@@ -1,0 +1,766 @@
+import React, { createContext, useContext, useState, useEffect } from 'react';
+
+// Context for global state
+const AppContext = createContext();
+
+const useAppState = () => {
+  const [balance, setBalance] = useState(1000);
+  const [prices, setPrices] = useState({
+    BTC: null,
+    ETH: null,
+    SOL: null
+  });
+  const [selectedMarket, setSelectedMarket] = useState('BTC');
+  const [positions, setPositions] = useState([]);
+  const [direction, setDirection] = useState('LONG');
+  const [positionSize, setPositionSize] = useState(50);
+  const [riskMode, setRiskMode] = useState('BALANCED');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advancedSettings, setAdvancedSettings] = useState({
+    orderType: 'MARKET', // MARKET or LIMIT
+    limitPrice: '',
+    customLeverage: '',
+    takeProfit: '',
+    stopLoss: ''
+  });
+
+  // Map risk modes to leverage
+  const leverageMap = {
+    SAFE: 2,
+    BALANCED: 5,
+    DEGENERATE: 10
+  };
+
+  // Fetch initial prices and add random movements
+  useEffect(() => {
+    const fetchInitialPrices = async () => {
+      try {
+        const btcRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
+        const ethRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT');
+        const solRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT');
+        
+        const btcData = await btcRes.json();
+        const ethData = await ethRes.json();
+        const solData = await solRes.json();
+        
+        setPrices({
+          BTC: parseFloat(btcData.price),
+          ETH: parseFloat(ethData.price),
+          SOL: parseFloat(solData.price)
+        });
+      } catch (error) {
+        console.error('Failed to fetch prices:', error);
+        setPrices({
+          BTC: 95000,
+          ETH: 3500,
+          SOL: 140
+        });
+      }
+    };
+
+    fetchInitialPrices();
+  }, []);
+
+  // Add random price movements
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPrices(prev => {
+        if (!prev.BTC) return prev;
+        
+        return {
+          BTC: prev.BTC * (1 + (Math.random() - 0.5) * 0.002), // ±0.2% movement
+          ETH: prev.ETH * (1 + (Math.random() - 0.5) * 0.003), // ±0.3% movement
+          SOL: prev.SOL * (1 + (Math.random() - 0.5) * 0.004)  // ±0.4% movement
+        };
+      });
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Update unrealized PnL for all positions
+  useEffect(() => {
+    if (positions.length > 0 && prices.BTC) {
+      setPositions(prevPositions => 
+        prevPositions.map(pos => {
+          const currentPrice = prices[pos.market];
+          const priceDiff = currentPrice - pos.entryPrice;
+          const multiplier = pos.direction === 'LONG' ? 1 : -1;
+          const leverage = pos.leverage;
+          const pnl = (priceDiff / pos.entryPrice) * pos.size * leverage * multiplier;
+          
+          // Check take profit
+          if (pos.takeProfit) {
+            const tpHit = pos.direction === 'LONG' 
+              ? currentPrice >= pos.takeProfit 
+              : currentPrice <= pos.takeProfit;
+            if (tpHit) {
+              return { ...pos, unrealizedPnL: pnl, closedByTP: true };
+            }
+          }
+
+          // Check stop loss
+          if (pos.stopLoss) {
+            const slHit = pos.direction === 'LONG' 
+              ? currentPrice <= pos.stopLoss 
+              : currentPrice >= pos.stopLoss;
+            if (slHit) {
+              return { ...pos, unrealizedPnL: pnl, closedBySL: true };
+            }
+          }
+          
+          // Check liquidation
+          const liquidationThreshold = pos.size / leverage;
+          if (Math.abs(pnl) >= liquidationThreshold) {
+            return { ...pos, unrealizedPnL: -pos.size, liquidated: true };
+          }
+          
+          return { ...pos, unrealizedPnL: pnl };
+        })
+      );
+
+      // Remove closed positions (TP, SL, liquidation)
+      setPositions(prev => {
+        const closedPositions = prev.filter(p => p.liquidated || p.closedByTP || p.closedBySL);
+        if (closedPositions.length > 0) {
+          const totalPnL = closedPositions.reduce((sum, p) => {
+            if (p.liquidated) return sum - p.size;
+            return sum + p.unrealizedPnL;
+          }, 0);
+          setBalance(b => b + totalPnL);
+          return prev.filter(p => !p.liquidated && !p.closedByTP && !p.closedBySL);
+        }
+        return prev;
+      });
+    }
+  }, [prices, positions.length]);
+
+  const openPosition = () => {
+    const currentPrice = prices[selectedMarket];
+    if (!currentPrice) return;
+
+    // Use custom leverage if advanced mode is on, otherwise use risk mode
+    const leverage = showAdvanced && advancedSettings.customLeverage 
+      ? parseFloat(advancedSettings.customLeverage)
+      : leverageMap[riskMode];
+
+    // For limit orders, check if price needs to be triggered
+    if (advancedSettings.orderType === 'LIMIT' && advancedSettings.limitPrice) {
+      const limitPrice = parseFloat(advancedSettings.limitPrice);
+      // In real app, this would be queued. For demo, we'll just use limit as entry
+      const entryPrice = limitPrice;
+      
+      const liquidationDistance = positionSize / leverage / positionSize;
+      const liquidationPrice = direction === 'LONG' 
+        ? entryPrice * (1 - liquidationDistance)
+        : entryPrice * (1 + liquidationDistance);
+
+      const newPosition = {
+        id: Date.now(),
+        market: selectedMarket,
+        entryPrice: entryPrice,
+        direction,
+        size: positionSize,
+        riskMode: showAdvanced ? 'CUSTOM' : riskMode,
+        leverage,
+        liquidationPrice,
+        unrealizedPnL: 0,
+        openedAt: new Date().toLocaleTimeString(),
+        takeProfit: advancedSettings.takeProfit ? parseFloat(advancedSettings.takeProfit) : null,
+        stopLoss: advancedSettings.stopLoss ? parseFloat(advancedSettings.stopLoss) : null
+      };
+
+      setPositions(prev => [...prev, newPosition]);
+      return;
+    }
+
+    // Market order
+    const liquidationDistance = positionSize / leverage / positionSize;
+    const liquidationPrice = direction === 'LONG' 
+      ? currentPrice * (1 - liquidationDistance)
+      : currentPrice * (1 + liquidationDistance);
+
+    const newPosition = {
+      id: Date.now(),
+      market: selectedMarket,
+      entryPrice: currentPrice,
+      direction,
+      size: positionSize,
+      riskMode: showAdvanced ? 'CUSTOM' : riskMode,
+      leverage,
+      liquidationPrice,
+      unrealizedPnL: 0,
+      openedAt: new Date().toLocaleTimeString(),
+      takeProfit: advancedSettings.takeProfit ? parseFloat(advancedSettings.takeProfit) : null,
+      stopLoss: advancedSettings.stopLoss ? parseFloat(advancedSettings.stopLoss) : null
+    };
+
+    setPositions(prev => [...prev, newPosition]);
+  };
+
+  const closePosition = (positionId) => {
+    const position = positions.find(p => p.id === positionId);
+    if (!position) return;
+
+    const pnl = position.unrealizedPnL;
+    setBalance(prev => prev + pnl);
+    setPositions(prev => prev.filter(p => p.id !== positionId));
+  };
+
+  const closeAllPositions = () => {
+    const totalPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
+    setBalance(prev => prev + totalPnL);
+    setPositions([]);
+  };
+
+  return {
+    balance,
+    prices,
+    selectedMarket,
+    setSelectedMarket,
+    positions,
+    direction,
+    setDirection,
+    positionSize,
+    setPositionSize,
+    riskMode,
+    setRiskMode,
+    showAdvanced,
+    setShowAdvanced,
+    advancedSettings,
+    setAdvancedSettings,
+    openPosition,
+    closePosition,
+    closeAllPositions
+  };
+};
+
+// Components
+const Header = ({ balance, positions }) => {
+  const totalUnrealizedPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
+  const liveBalance = balance + totalUnrealizedPnL;
+  const balanceColor = totalUnrealizedPnL >= 0 ? 'text-green-500' : 'text-red-500';
+  
+  return (
+    <div className="flex justify-between items-center mb-8">
+      <div>
+        <h1 className="text-2xl font-bold text-white">PerpsX</h1>
+        <span className="text-xs text-gray-500 uppercase tracking-wider">Demo Mode</span>
+      </div>
+      <div className="text-right">
+        <div className="text-xs text-gray-500 mb-1">Demo Balance</div>
+        <div className={`text-2xl font-bold transition-colors ${positions.length > 0 ? balanceColor : 'text-white'}`}>
+          ${liveBalance.toFixed(2)}
+        </div>
+        {positions.length > 0 && (
+          <div className="text-xs text-gray-500 mt-1">
+            Base: ${balance.toFixed(2)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const MarketSelector = ({ selectedMarket, setSelectedMarket, prices }) => {
+  const markets = ['BTC', 'ETH', 'SOL'];
+  
+  return (
+    <div className="mb-6">
+      <div className="grid grid-cols-3 gap-3">
+        {markets.map(market => (
+          <button
+            key={market}
+            onClick={() => setSelectedMarket(market)}
+            className={`py-4 px-4 rounded-2xl font-semibold transition-all duration-300 ease-smooth transform hover:scale-105 active:scale-95 ${
+              selectedMarket === market
+                ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/50 scale-105'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:shadow-lg hover:shadow-gray-700/30'
+            }`}
+          >
+            <div className="text-xs font-semibold opacity-90">{market}-USDT</div>
+            <div className="text-sm font-bold mt-1">
+              {prices[market] ? `$${Number(prices[market]).toFixed(2)}` : '...'}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const MarketPrice = ({ market, price }) => (
+  <div className="mb-8">
+    <div className="text-sm text-gray-500 mb-2">{market}-USDT</div>
+    <div className="text-4xl font-bold text-white">
+      {price ? `$${Number(price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '...'}
+    </div>
+  </div>
+);
+
+const DirectionSelector = ({ direction, setDirection }) => (
+  <div className="mb-6">
+    <div className="text-sm text-gray-500 mb-3">Direction</div>
+    <div className="grid grid-cols-2 gap-4">
+      <button
+        onClick={() => setDirection('LONG')}
+        className={`py-4 rounded-2xl font-bold text-lg transition-all duration-300 ease-smooth transform hover:scale-105 active:scale-95 ${
+          direction === 'LONG'
+            ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/50 scale-105'
+            : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:shadow-lg'
+        }`}
+      >
+        LONG
+      </button>
+      <button
+        onClick={() => setDirection('SHORT')}
+        className={`py-4 rounded-2xl font-bold text-lg transition-all duration-300 ease-smooth transform hover:scale-105 active:scale-95 ${
+          direction === 'SHORT'
+            ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg shadow-red-500/50 scale-105'
+            : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:shadow-lg'
+        }`}
+      >
+        SHORT
+      </button>
+    </div>
+  </div>
+);
+
+const PositionSizeSelector = ({ positionSize, setPositionSize }) => {
+  const sizes = [10, 50, 100];
+  
+  return (
+    <div className="mb-6">
+      <div className="text-sm text-gray-500 mb-3">Position Size</div>
+      <div className="grid grid-cols-3 gap-3">
+        {sizes.map(size => (
+          <button
+            key={size}
+            onClick={() => setPositionSize(size)}
+            className={`py-4 rounded-2xl font-bold transition-all duration-300 ease-smooth transform hover:scale-105 active:scale-95 ${
+              positionSize === size
+                ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/50 scale-105'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:shadow-lg'
+            }`}
+          >
+            ${size}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const RiskModeSelector = ({ riskMode, setRiskMode, showAdvanced }) => {
+  if (showAdvanced) return null;
+
+  const modes = [
+    { name: 'SAFE', color: 'green' },
+    { name: 'BALANCED', color: 'yellow' },
+    { name: 'DEGENERATE', color: 'red' }
+  ];
+
+  return (
+    <div className="mb-8">
+      <div className="text-sm text-gray-500 mb-3">Risk Mode</div>
+      <div className="grid grid-cols-3 gap-3">
+        {modes.map(mode => (
+          <button
+            key={mode.name}
+            onClick={() => setRiskMode(mode.name)}
+            className={`py-4 rounded-2xl font-bold transition-all duration-300 ease-smooth transform hover:scale-105 active:scale-95 ${
+              riskMode === mode.name
+                ? 'text-white shadow-lg scale-105'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:shadow-lg'
+            }`}
+            style={riskMode === mode.name ? {
+              backgroundColor: mode.color === 'green' ? '#10b981' : mode.color === 'yellow' ? '#f59e0b' : '#ef4444',
+              boxShadow: `0 15px 40px -10px ${mode.color === 'green' ? 'rgba(16, 185, 129, 0.6)' : mode.color === 'yellow' ? 'rgba(245, 158, 11, 0.6)' : 'rgba(239, 68, 68, 0.6)'}`
+            } : {}}
+          >
+            {mode.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const AdvancedToggle = ({ showAdvanced, setShowAdvanced }) => (
+  <div className="mb-6">
+    <button
+      onClick={() => setShowAdvanced(!showAdvanced)}
+      className="w-full py-4 rounded-2xl bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-300 transition-all duration-300 ease-smooth transform hover:scale-105 active:scale-95 text-sm font-semibold shadow-md hover:shadow-lg"
+    >
+      {showAdvanced ? '← Back to Simple' : 'Advanced Options →'}
+    </button>
+  </div>
+);
+
+const AdvancedSettings = ({ advancedSettings, setAdvancedSettings, selectedMarket, prices, direction, positionSize, riskMode }) => {
+  const currentPrice = prices[selectedMarket];
+  
+  const leverageMap = {
+    SAFE: 2,
+    BALANCED: 5,
+    DEGENERATE: 10
+  };
+  
+  const leverage = advancedSettings.customLeverage 
+    ? parseFloat(advancedSettings.customLeverage) 
+    : leverageMap[riskMode];
+  
+  const entryPrice = advancedSettings.orderType === 'LIMIT' && advancedSettings.limitPrice
+    ? parseFloat(advancedSettings.limitPrice)
+    : currentPrice;
+  
+  // Calculate PnL at Take Profit price
+  const calculateTPPnL = () => {
+    if (!advancedSettings.takeProfit || !entryPrice) return null;
+    const tp = parseFloat(advancedSettings.takeProfit);
+    const priceDiff = tp - entryPrice;
+    const multiplier = direction === 'LONG' ? 1 : -1;
+    return (priceDiff / entryPrice) * positionSize * leverage * multiplier;
+  };
+  
+  // Calculate PnL at Stop Loss price
+  const calculateSLPnL = () => {
+    if (!advancedSettings.stopLoss || !entryPrice) return null;
+    const sl = parseFloat(advancedSettings.stopLoss);
+    const priceDiff = sl - entryPrice;
+    const multiplier = direction === 'LONG' ? 1 : -1;
+    return (priceDiff / entryPrice) * positionSize * leverage * multiplier;
+  };
+  
+  const tpPnL = calculateTPPnL();
+  const slPnL = calculateSLPnL();
+
+  return (
+    <div className="mb-8 space-y-4">
+      {/* Order Type */}
+      <div>
+        <div className="text-sm text-gray-400 mb-3 font-medium">Order Type</div>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => setAdvancedSettings(prev => ({ ...prev, orderType: 'MARKET' }))}
+            className={`py-3 rounded-2xl font-bold transition-all duration-300 ease-smooth transform hover:scale-105 active:scale-95 ${
+              advancedSettings.orderType === 'MARKET'
+                ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/50'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:shadow-lg'
+            }`}
+          >
+            Market
+          </button>
+          <button
+            onClick={() => setAdvancedSettings(prev => ({ ...prev, orderType: 'LIMIT' }))}
+            className={`py-3 rounded-2xl font-bold transition-all duration-300 ease-smooth transform hover:scale-105 active:scale-95 ${
+              advancedSettings.orderType === 'LIMIT'
+                ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/50'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:shadow-lg'
+            }`}
+          >
+            Limit
+          </button>
+        </div>
+      </div>
+
+      {/* Limit Price */}
+      {advancedSettings.orderType === 'LIMIT' && (
+        <div className="animate-float-in">
+          <div className="text-sm text-gray-400 mb-2 font-medium">Limit Entry Price</div>
+          <input
+            type="number"
+            value={advancedSettings.limitPrice}
+            onChange={(e) => setAdvancedSettings(prev => ({ ...prev, limitPrice: e.target.value }))}
+            placeholder={currentPrice ? `Current: $${currentPrice.toFixed(2)}` : 'Enter price'}
+            className="w-full py-3 px-4 rounded-2xl bg-gray-800 text-white placeholder-gray-500 border border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all duration-200"
+          />
+        </div>
+      )}
+      {/* Custom Leverage */}
+      <div>
+        <div className="text-sm text-gray-400 mb-2 font-medium">Custom Leverage (1-100x)</div>
+        <input
+          type="number"
+          value={advancedSettings.customLeverage}
+          onChange={(e) => setAdvancedSettings(prev => ({ ...prev, customLeverage: e.target.value }))}
+          placeholder="e.g., 5"
+          min="1"
+          max="100"
+          className="w-full py-3 px-4 rounded-2xl bg-gray-800 text-white placeholder-gray-500 border border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all duration-200"
+        />
+      </div>
+
+      {/* Take Profit */}
+      <div>
+        <div className="text-sm text-gray-400 mb-2 font-medium">Take Profit Price (Optional)</div>
+        <input
+          type="number"
+          value={advancedSettings.takeProfit}
+          onChange={(e) => setAdvancedSettings(prev => ({ ...prev, takeProfit: e.target.value }))}
+          placeholder="Auto-close at profit"
+          className="w-full py-3 px-4 rounded-2xl bg-gray-800 text-white placeholder-gray-500 border border-gray-700 focus:border-green-500 focus:ring-2 focus:ring-green-500/30 focus:outline-none transition-all duration-200"
+        />
+        {tpPnL !== null && (
+          <div className="text-xs text-green-400 mt-3 font-bold animate-pulse-soft">
+            PnL at TP: +${tpPnL.toFixed(2)}
+          </div>
+        )}
+      </div>
+
+      {/* Stop Loss */}
+      <div>
+        <div className="text-sm text-gray-400 mb-2 font-medium">Stop Loss Price (Optional)</div>
+        <input
+          type="number"
+          value={advancedSettings.stopLoss}
+          onChange={(e) => setAdvancedSettings(prev => ({ ...prev, stopLoss: e.target.value }))}
+          placeholder="Auto-close at loss"
+          className="w-full py-3 px-4 rounded-2xl bg-gray-800 text-white placeholder-gray-500 border border-gray-700 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 focus:outline-none transition-all duration-200"
+        />
+        {slPnL !== null && (
+          <div className="text-xs text-red-400 mt-3 font-bold animate-pulse-soft">
+            PnL at SL: ${slPnL.toFixed(2)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const ActionButtons = ({ openPosition, selectedMarket, prices, direction, positionSize, riskMode, showAdvanced, advancedSettings }) => {
+  const leverageMap = {
+    SAFE: 2,
+    BALANCED: 5,
+    DEGENERATE: 10
+  };
+
+  const currentPrice = prices[selectedMarket];
+  const leverage = showAdvanced && advancedSettings.customLeverage 
+    ? parseFloat(advancedSettings.customLeverage) 
+    : leverageMap[riskMode];
+
+  const entryPrice = advancedSettings.orderType === 'LIMIT' && advancedSettings.limitPrice
+    ? parseFloat(advancedSettings.limitPrice)
+    : currentPrice;
+
+  const liquidationDistance = positionSize / leverage / positionSize;
+  const liquidationPrice = entryPrice && direction === 'LONG' 
+    ? entryPrice * (1 - liquidationDistance)
+    : entryPrice && entryPrice * (1 + liquidationDistance);
+
+  return (
+    <div className="mb-8 space-y-4">
+      {entryPrice && (
+        <div className="bg-gradient-to-br from-gray-900/80 to-gray-800/40 rounded-3xl p-5 mb-4 border border-gray-700/50 backdrop-blur-sm shadow-lg transition-all duration-300">
+          <div className="flex justify-between items-center text-sm mb-3">
+            <span className="text-gray-400">Entry Price</span>
+            <span className="text-white font-bold">${Number(entryPrice).toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between items-center text-sm mb-3">
+            <span className="text-gray-400">Leverage</span>
+            <span className="text-white font-bold">{leverage}x</span>
+          </div>
+          <div className="flex justify-between items-center text-sm pb-3 border-b border-gray-700/30">
+            <span className="text-gray-400">Liquidation Price</span>
+            <span className="text-red-400 font-bold">${Number(liquidationPrice).toFixed(2)}</span>
+          </div>
+          {advancedSettings.takeProfit && (
+            <div className="flex justify-between items-center text-sm mt-3 pt-3 border-t border-gray-700/30">
+              <span className="text-gray-400">Take Profit</span>
+              <span className="text-green-400 font-bold">${parseFloat(advancedSettings.takeProfit).toFixed(2)}</span>
+            </div>
+          )}
+          {advancedSettings.stopLoss && (
+            <div className="flex justify-between items-center text-sm mt-3">
+              <span className="text-gray-400">Stop Loss</span>
+              <span className="text-red-400 font-bold">${parseFloat(advancedSettings.stopLoss).toFixed(2)}</span>
+            </div>
+          )}
+        </div>
+      )}
+      <button
+        onClick={openPosition}
+        className="w-full py-5 rounded-3xl bg-gradient-to-r from-blue-500 via-purple-600 to-pink-600 text-white font-bold text-lg shadow-2xl shadow-purple-600/50 hover:shadow-3xl hover:shadow-purple-600/70 transition-all duration-300 ease-smooth transform hover:scale-105 active:scale-95 hover:-translate-y-1 relative overflow-hidden group"
+      >
+        <span className="relative z-10">Open Trade</span>
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-500"></div>
+      </button>
+    </div>
+  );
+};
+
+const PositionCard = ({ position, closePosition }) => {
+  const pnlColor = position.unrealizedPnL >= 0 ? 'text-green-500' : 'text-red-500';
+
+  return (
+    <div className="bg-gradient-to-br from-gray-900/80 to-gray-800/40 rounded-3xl p-5 border border-gray-700/50 mb-3 backdrop-blur-sm shadow-lg hover:shadow-2xl transition-all duration-300 hover:border-gray-600/50 transform hover:scale-102">
+      <div className="flex justify-between items-start mb-4">
+        <div>
+          <div className="text-xs text-gray-400 uppercase tracking-wider">{position.market}-USDT</div>
+          <div className={`text-xl font-bold mt-1 ${position.direction === 'LONG' ? 'text-green-500' : 'text-red-500'}`}>
+            {position.direction} ${position.size}
+          </div>
+        </div>
+        <button
+          onClick={() => closePosition(position.id)}
+          className="px-4 py-2 bg-gradient-to-br from-gray-700 to-gray-800 hover:from-gray-600 hover:to-gray-700 rounded-2xl text-sm font-semibold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md hover:shadow-lg"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="bg-gray-800/40 rounded-2xl p-3">
+          <div className="text-xs text-gray-400 mb-1">Entry</div>
+          <div className="text-sm font-bold text-white">
+            ${Number(position.entryPrice).toFixed(2)}
+          </div>
+        </div>
+        <div className="bg-gray-800/40 rounded-2xl p-3">
+          <div className="text-xs text-gray-400 mb-1">Leverage</div>
+          <div className="text-sm font-bold text-white">{position.leverage}x</div>
+        </div>
+        <div className="bg-gray-800/40 rounded-2xl p-3">
+          <div className="text-xs text-gray-400 mb-1">Time</div>
+          <div className="text-sm font-bold text-white">{position.openedAt}</div>
+        </div>
+      </div>
+
+      {(position.takeProfit || position.stopLoss) && (
+        <div className="bg-gradient-to-br from-gray-800/50 to-gray-700/30 rounded-2xl p-3 mb-4 text-xs space-y-2 border border-gray-700/30">
+          {position.takeProfit && (
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">Take Profit</span>
+              <span className="text-green-400 font-bold">${position.takeProfit.toFixed(2)}</span>
+            </div>
+          )}
+          {position.stopLoss && (
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">Stop Loss</span>
+              <span className="text-red-400 font-bold">${position.stopLoss.toFixed(2)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="border-t border-gray-700/30 pt-4">
+        <div className="flex justify-between items-center mb-2">
+          <div className="text-sm text-gray-400">PnL</div>
+          <div className={`text-2xl font-bold ${pnlColor}`}>
+            {position.unrealizedPnL >= 0 ? '+' : ''}${position.unrealizedPnL.toFixed(2)}
+          </div>
+        </div>
+        <div className="text-xs text-gray-500">
+          Liq: <span className="text-red-400 font-bold">${Number(position.liquidationPrice).toFixed(2)}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PositionsList = ({ positions, closePosition, closeAllPositions }) => {
+  if (positions.length === 0) return null;
+
+  const totalPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
+  const pnlColor = totalPnL >= 0 ? 'text-green-500' : 'text-red-500';
+
+  return (
+    <div className="mb-8">
+      <div className="flex justify-between items-center mb-4">
+        <div>
+          <div className="text-sm text-gray-400">
+            Active Positions ({positions.length})
+          </div>
+          <div className={`text-lg font-bold ${pnlColor}`}>
+            Total: {totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)}
+          </div>
+        </div>
+        <button
+          onClick={closeAllPositions}
+          className="px-5 py-2 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 rounded-2xl text-sm font-bold transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-lg hover:shadow-xl hover:shadow-red-600/50"
+        >
+          Close All
+        </button>
+      </div>
+      
+      <div className="space-y-4">
+        {positions.map(position => (
+          <PositionCard 
+            key={position.id} 
+            position={position} 
+            closePosition={closePosition}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const App = () => {
+  const state = useAppState();
+
+  return (
+    <AppContext.Provider value={state}>
+      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white">
+        <div className="max-w-md mx-auto p-6 py-8">
+          <Header balance={state.balance} positions={state.positions} />
+          <MarketSelector 
+            selectedMarket={state.selectedMarket}
+            setSelectedMarket={state.setSelectedMarket}
+            prices={state.prices}
+          />
+          <MarketPrice 
+            market={state.selectedMarket}
+            price={state.prices[state.selectedMarket]} 
+          />
+          <DirectionSelector 
+            direction={state.direction} 
+            setDirection={state.setDirection}
+          />
+          <PositionSizeSelector 
+            positionSize={state.positionSize} 
+            setPositionSize={state.setPositionSize}
+          />
+          <RiskModeSelector 
+            riskMode={state.riskMode} 
+            setRiskMode={state.setRiskMode}
+            showAdvanced={state.showAdvanced}
+          />
+          <AdvancedToggle 
+            showAdvanced={state.showAdvanced}
+            setShowAdvanced={state.setShowAdvanced}
+          />
+          {state.showAdvanced && (
+            <AdvancedSettings
+              advancedSettings={state.advancedSettings}
+              setAdvancedSettings={state.setAdvancedSettings}
+              selectedMarket={state.selectedMarket}
+              prices={state.prices}
+              direction={state.direction}
+              positionSize={state.positionSize}
+              riskMode={state.riskMode}
+            />
+          )}
+          <ActionButtons 
+            openPosition={state.openPosition}
+            selectedMarket={state.selectedMarket}
+            prices={state.prices}
+            direction={state.direction}
+            positionSize={state.positionSize}
+            riskMode={state.riskMode}
+            showAdvanced={state.showAdvanced}
+            advancedSettings={state.advancedSettings}
+          />
+          <PositionsList 
+            positions={state.positions}
+            closePosition={state.closePosition}
+            closeAllPositions={state.closeAllPositions}
+          />
+        </div>
+      </div>
+    </AppContext.Provider>
+  );
+};
+
+export default App;
