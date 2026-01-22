@@ -923,7 +923,7 @@ const App = () => {
                   market={state.selectedMarket}
                   price={state.prices[state.selectedMarket]}
                 />
-                <div className="w-full h-full flex items-center justify-center">
+                <div className="flex-1 w-full">
                   <AlivePriceChart
                     prices={state.priceHistory[state.selectedMarket]}
                     direction={state.direction === 'LONG' ? 'UP' : 'DOWN'}

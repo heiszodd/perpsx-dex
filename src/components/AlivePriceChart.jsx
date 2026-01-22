@@ -85,11 +85,12 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
   }, [prices, currentPrice]);
 
   return (
-    <div className="flex items-center justify-center w-full h-64 bg-gray-950 rounded-2xl overflow-hidden">
+    <div className="w-full h-full flex items-center justify-center overflow-hidden">
       <svg
         width="100%"
         height="100%"
         viewBox="0 0 600 200"
+        preserveAspectRatio="xMidYMid meet"
         className="drop-shadow-lg"
       >
         <defs>
