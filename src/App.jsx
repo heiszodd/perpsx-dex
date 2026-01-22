@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useTradingEngine } from './hooks/useTradingEngine';
+import { useLivePrices } from './hooks/useLivePrices';
 import AlivePriceChart from './components/AlivePriceChart';
 
 // Context for global state
@@ -7,16 +8,29 @@ const AppContext = createContext();
 
 const useAppState = () => {
   const [balance, setBalance] = useState(1000);
-  const [prices, setPrices] = useState({
-    BTC: null,
-    ETH: null,
-    SOL: null
+  
+  // Use CoinGecko API for live prices (polls every 4 seconds, max 50 history points)
+  const { prices: livePrices, priceHistory: liveHistory, error: priceError } = useLivePrices(
+    ['bitcoin', 'ethereum', 'solana'],
+    4000,
+    50
+  );
+  
+  // Fallback to local state if API fails
+  const [fallbackPrices, setFallbackPrices] = useState({
+    BTC: 95000,
+    ETH: 3500,
+    SOL: 140
   });
-  const [priceHistory, setPriceHistory] = useState({
-    BTC: [],
-    ETH: [],
-    SOL: []
+  const [fallbackHistory, setFallbackHistory] = useState({
+    BTC: [95000],
+    ETH: [3500],
+    SOL: [140]
   });
+  
+  // Use live prices if available, fallback otherwise
+  const prices = (livePrices.BTC && livePrices.ETH && livePrices.SOL) ? livePrices : fallbackPrices;
+  const priceHistory = (liveHistory.BTC && liveHistory.BTC.length > 0) ? liveHistory : fallbackHistory;
   const [selectedMarket, setSelectedMarket] = useState('BTC');
   const [positions, setPositions] = useState([]);
   const [direction, setDirection] = useState('LONG');
@@ -38,78 +52,34 @@ const useAppState = () => {
     DEGENERATE: 10
   };
 
-  // Fetch initial prices and add random movements
+  // Update fallback prices if API fails (emit warning)
   useEffect(() => {
-    const fetchInitialPrices = async () => {
-      try {
-        const btcRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
-        const ethRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT');
-        const solRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT');
-        
-        const btcData = await btcRes.json();
-        const ethData = await ethRes.json();
-        const solData = await solRes.json();
-        
-        const initialPrices = {
-          BTC: parseFloat(btcData.price),
-          ETH: parseFloat(ethData.price),
-          SOL: parseFloat(solData.price)
-        };
-
-        setPrices(initialPrices);
-
-        // Initialize price history with initial prices
-        setPriceHistory({
-          BTC: [initialPrices.BTC],
-          ETH: [initialPrices.ETH],
-          SOL: [initialPrices.SOL]
-        });
-      } catch (error) {
-        console.error('Failed to fetch prices:', error);
-        const fallbackPrices = {
-          BTC: 95000,
-          ETH: 3500,
-          SOL: 140
-        };
-        setPrices(fallbackPrices);
-
-        // Initialize price history with fallback prices
-        setPriceHistory({
-          BTC: [fallbackPrices.BTC],
-          ETH: [fallbackPrices.ETH],
-          SOL: [fallbackPrices.SOL]
-        });
-      }
-    };
-
-    fetchInitialPrices();
-  }, []);
-
-  // Add random price movements
+    if (priceError) {
+      console.warn('⚠️ CoinGecko API error - using demo prices:', priceError);
+    }
+  }, [priceError]);
+  
+  // Add slight random jitter to fallback prices for demo mode
   useEffect(() => {
     const interval = setInterval(() => {
-      setPrices(prev => {
-        if (!prev.BTC) return prev;
-
-        const newPrices = {
-          BTC: prev.BTC * (1 + (Math.random() - 0.5) * 0.002), // ±0.2% movement
-          ETH: prev.ETH * (1 + (Math.random() - 0.5) * 0.003), // ±0.3% movement
-          SOL: prev.SOL * (1 + (Math.random() - 0.5) * 0.004)  // ±0.4% movement
-        };
-
-        // Update price history
-        setPriceHistory(prevHistory => ({
-          BTC: [...prevHistory.BTC, newPrices.BTC].slice(-50), // Keep last 50 prices
-          ETH: [...prevHistory.ETH, newPrices.ETH].slice(-50),
-          SOL: [...prevHistory.SOL, newPrices.SOL].slice(-50)
+      if (!livePrices.BTC || !livePrices.ETH || !livePrices.SOL) {
+        // Only add jitter if using fallback prices (live prices already updating via API)
+        setFallbackPrices(prev => ({
+          BTC: prev.BTC * (1 + (Math.random() - 0.5) * 0.0005),
+          ETH: prev.ETH * (1 + (Math.random() - 0.5) * 0.0005),
+          SOL: prev.SOL * (1 + (Math.random() - 0.5) * 0.0005)
         }));
-
-        return newPrices;
-      });
+        
+        setFallbackHistory(prevHistory => ({
+          BTC: [...prevHistory.BTC, fallbackPrices.BTC].slice(-50),
+          ETH: [...prevHistory.ETH, fallbackPrices.ETH].slice(-50),
+          SOL: [...prevHistory.SOL, fallbackPrices.SOL].slice(-50)
+        }));
+      }
     }, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [livePrices.BTC, livePrices.ETH, livePrices.SOL, fallbackPrices]);
 
   // Update unrealized PnL for all positions
   useEffect(() => {
@@ -149,10 +119,12 @@ const useAppState = () => {
             }
           }
 
-          // Check liquidation
-          const lossThreshold = pos.initialMargin - pos.maintenanceMargin;
-          if (pnl <= -lossThreshold) {
-            const closedPos = { ...pos, unrealizedPnL: -pos.size, liquidated: true };
+          // Check liquidation: loss equals exactly the risk amount at liquidation
+          // unrealizedPnL = (priceDiff / entryPrice) * notionalSize * multiplier
+          // At liquidation: unrealizedPnL = -riskAmount (since notionalSize = riskAmount * leverage)
+          const riskAmount = pos.riskAmount || pos.initialMargin;
+          if (pnl <= -riskAmount) {
+            const closedPos = { ...pos, unrealizedPnL: -riskAmount, liquidated: true };
             closedPositions.push(closedPos);
             return closedPos;
           }
@@ -859,7 +831,6 @@ const App = () => {
       </div>
     </AppContext.Provider>
   );
-};
 };
 
 export default App;
