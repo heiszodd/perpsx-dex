@@ -10,11 +10,11 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
     const priceRange = maxPrice - minPrice || 1; // Avoid division by zero
 
     const svgWidth = 600;
-    const svgHeight = 200;
+    const svgHeight = 250;
     const padding = 20;
 
     return prices.map((price, index) => {
-      const x = (index / (prices.length - 1)) * (svgWidth - 2 * padding) + padding;
+      const x = (index / Math.max(prices.length - 1, 1)) * (svgWidth - 2 * padding) + padding;
       const y = svgHeight - padding - ((price - minPrice) / priceRange) * (svgHeight - 2 * padding);
       return { x, y };
     });
@@ -56,7 +56,7 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
     const priceRange = maxPrice - minPrice || 1;
 
     const svgWidth = 600;
-    const svgHeight = 200;
+    const svgHeight = 250;
     const padding = 20;
 
     // Entry point is at the middle of the chart (where position was opened)
@@ -74,7 +74,7 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
     const priceRange = maxPrice - minPrice || 1;
 
     const svgWidth = 600;
-    const svgHeight = 200;
+    const svgHeight = 250;
     const padding = 20;
 
     // Current price is at the end of the chart
@@ -85,13 +85,14 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
   }, [prices, currentPrice]);
 
   return (
-    <div className="w-full h-full flex items-center justify-center overflow-hidden">
+    <div className="w-full h-full min-h-96 flex items-center justify-center bg-gray-950/50 rounded-lg overflow-hidden">
       <svg
         width="100%"
         height="100%"
-        viewBox="0 0 600 200"
+        viewBox="0 0 600 250"
         preserveAspectRatio="xMidYMid meet"
         className="drop-shadow-lg"
+        style={{ minHeight: '300px' }}
       >
         <defs>
           {/* Gradient definition */}

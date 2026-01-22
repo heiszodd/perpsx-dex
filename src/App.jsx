@@ -328,6 +328,7 @@ const useAppState = () => {
     balance,
     prices,
     priceHistory,
+    livePrices,
     selectedMarket,
     setSelectedMarket,
     positions,
@@ -409,9 +410,18 @@ const MarketSelector = ({ selectedMarket, setSelectedMarket, prices }) => {
   );
 };
 
-const MarketPrice = ({ market, price }) => (
+const MarketPrice = ({ market, price, isLive = true }) => (
   <div className="mb-8">
-    <div className="text-sm text-gray-500 mb-2">{market}-USDT</div>
+    <div className="flex items-center justify-between mb-2">
+      <div className="text-sm text-gray-500">{market}-USDT</div>
+      <div className={`text-xs px-2 py-1 rounded ${
+        isLive 
+          ? 'bg-green-500/20 text-green-400' 
+          : 'bg-yellow-500/20 text-yellow-400'
+      }`}>
+        {isLive ? '🟢 LIVE' : '🟡 DEMO'}
+      </div>
+    </div>
     <div className="text-4xl font-bold text-white">
       {price ? `$${Number(price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '...'}
     </div>
@@ -835,6 +845,7 @@ const App = () => {
           <MarketPrice
             market={state.selectedMarket}
             price={state.prices[state.selectedMarket]}
+            isLive={!!(state.livePrices.BTC && state.livePrices.ETH && state.livePrices.SOL)}
           />
           <AlivePriceChart
             prices={state.priceHistory[state.selectedMarket]}
@@ -890,9 +901,9 @@ const App = () => {
 
         {/* Desktop / Landscape Layout */}
         <div className="hidden lg:block w-full h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white overflow-hidden">
-          <div className="flex h-full gap-6 p-8">
-            {/* Left Panel: Chart & Market Info (2/3 width) */}
-            <div className="flex-1 flex flex-col gap-4 min-w-0 overflow-hidden">
+          <div className="flex h-full gap-6 p-8 overflow-hidden">
+            {/* Left Panel: Chart & Market Info (flex-1) */}
+            <div className="flex-1 flex flex-col gap-4 min-w-0 min-h-0 overflow-hidden">
               <Header balance={state.balance} positions={state.positions} onReset={state.resetState} />
               
               {/* Market Selector */}
@@ -917,13 +928,16 @@ const App = () => {
                 </div>
               </div>
 
-              {/* Large Chart Area */}
+              {/* Large Chart Area - takes remaining space */}
               <div className="flex-1 bg-gray-800/30 rounded-2xl p-6 flex flex-col items-center justify-center overflow-hidden min-h-0">
-                <MarketPrice
-                  market={state.selectedMarket}
-                  price={state.prices[state.selectedMarket]}
-                />
-                <div className="flex-1 w-full">
+                <div className="flex-shrink-0">
+                  <MarketPrice
+                    market={state.selectedMarket}
+                    price={state.prices[state.selectedMarket]}
+                    isLive={!!(state.livePrices.BTC && state.livePrices.ETH && state.livePrices.SOL)}
+                  />
+                </div>
+                <div className="flex-1 w-full min-h-0">
                   <AlivePriceChart
                     prices={state.priceHistory[state.selectedMarket]}
                     direction={state.direction === 'LONG' ? 'UP' : 'DOWN'}
@@ -935,8 +949,8 @@ const App = () => {
               </div>
             </div>
 
-            {/* Right Panel: Trading Controls (1/3 width) */}
-            <div className="w-96 flex flex-col gap-4 overflow-y-auto pr-2">
+            {/* Right Panel: Trading Controls (w-96) */}
+            <div className="w-96 flex flex-col gap-4 overflow-y-auto pr-2 flex-shrink-0 min-h-0">
               {/* Direction */}
               <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
                 <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Position Direction</div>

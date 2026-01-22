@@ -45,7 +45,10 @@ export const useLivePrices = (
       const ids = symbols.join(',');
       const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`;
 
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
 
       if (!response.ok) {
         throw new Error(`CoinGecko API error: ${response.status}`);
@@ -64,24 +67,29 @@ export const useLivePrices = (
         }
       });
 
-      // Update current prices
-      setPrices(prevPrices => ({
-        ...prevPrices,
-        ...newPrices
-      }));
+      // Only update if we got prices
+      if (Object.keys(newPrices).length > 0) {
+        // Update current prices
+        setPrices(prevPrices => ({
+          ...prevPrices,
+          ...newPrices
+        }));
 
-      // Update price history
-      setPriceHistory(prevHistory => {
-        const newHistory = { ...prevHistory };
+        // Update price history
+        setPriceHistory(prevHistory => {
+          const newHistory = { ...prevHistory };
 
-        Object.entries(newPrices).forEach(([symbol, price]) => {
-          if (price !== null) {
-            newHistory[symbol] = [...(prevHistory[symbol] || []), price].slice(-maxHistoryPoints);
-          }
+          Object.entries(newPrices).forEach(([symbol, price]) => {
+            if (price !== null) {
+              newHistory[symbol] = [...(prevHistory[symbol] || []), price].slice(-maxHistoryPoints);
+            }
+          });
+
+          return newHistory;
         });
 
-        return newHistory;
-      });
+        console.log('✅ CoinGecko prices updated:', newPrices);
+      }
 
       // Clear any previous errors and update status
       setError(null);
