@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 @layer base {
-  /* Light mode styles - high contrast */
+  /* Light mode styles - minimal, not forcing aggressive overrides */
   html.light {
     color-scheme: light;
   }
@@ -22,47 +22,6 @@
   html.light textarea:focus,
   html.light select:focus {
     @apply border-blue-500 ring-blue-400/30 ring-2;
-  }
-
-  html.light button {
-    @apply text-gray-900;
-  }
-
-  /* Light mode color overrides - direct values to avoid circular deps */
-  html.light .bg-gray-950 {
-    background-color: rgb(243, 244, 246);
-  }
-
-  html.light .bg-gray-900 {
-    background-color: rgb(243, 244, 246);
-  }
-
-  html.light .bg-gray-800 {
-    background-color: rgb(229, 231, 235);
-  }
-
-  html.light .bg-gray-700 {
-    background-color: rgb(209, 213, 219);
-  }
-
-  html.light .text-white {
-    color: rgb(17, 24, 39);
-  }
-
-  html.light .text-gray-400 {
-    color: rgb(75, 85, 99);
-  }
-
-  html.light .text-gray-500 {
-    color: rgb(75, 85, 99);
-  }
-
-  html.light .border-gray-700 {
-    border-color: rgb(209, 213, 219);
-  }
-
-  html.light .border-gray-600 {
-    border-color: rgb(229, 231, 235);
   }
 
   /* Dark mode styles (default) */

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 
-const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl, highLow, theme = 'dark' }) => {
+const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl, highLow }) => {
   // Normalize prices to fit within SVG bounds
   const normalizedData = useMemo(() => {
     if (!prices || prices.length === 0) return [];
@@ -42,19 +42,13 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl, hig
     return path;
   }, [normalizedData]);
 
-  // Determine gradient colors based on direction and theme
+  // Determine gradient colors based on direction
   const gradientColors = direction === 'UP'
-    ? { 
-        start: theme === 'dark' ? '#3b82f6' : '#1e40af', 
-        end: theme === 'dark' ? '#8b5cf6' : '#6d28d9' 
-      }
-    : { 
-        start: theme === 'dark' ? '#ef4444' : '#991b1b', 
-        end: theme === 'dark' ? '#f97316' : '#c2410c' 
-      };
+    ? { start: '#3b82f6', end: '#8b5cf6' }
+    : { start: '#ef4444', end: '#f97316' };
 
-  // Chart background color based on theme
-  const chartBg = theme === 'dark' ? 'rgba(31, 41, 55, 0.5)' : 'rgba(243, 244, 246, 0.7)';
+  // Chart background - darker for better contrast
+  const chartBg = 'rgba(31, 41, 55, 0.5)';
 
   // Calculate entry point and current price positions
   const entryPoint = useMemo(() => {
@@ -94,9 +88,7 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl, hig
   }, [prices, currentPrice]);
 
   return (
-    <div className={`w-full h-full min-h-96 flex items-center justify-center rounded-lg overflow-hidden ${
-      theme === 'dark' ? 'bg-gray-950/50' : 'bg-gray-200/30'
-    }`}>
+    <div className="w-full h-full min-h-96 flex items-center justify-center bg-gray-950/50 rounded-lg overflow-hidden">
       <svg
         width="100%"
         height="100%"
@@ -166,7 +158,7 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl, hig
               cy={entryPoint.y}
               r="6"
               fill="#10b981"
-              stroke={theme === 'dark' ? 'white' : '#1f2937'}
+              stroke="white"
               strokeWidth="2"
               filter="url(#glow)"
             />
@@ -174,8 +166,8 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl, hig
               x={entryPoint.x}
               y={entryPoint.y - 15}
               textAnchor="middle"
-              fill={theme === 'dark' ? '#10b981' : '#059669'}
-              fontSize="10"
+              fill="#10b981"
+              fontSize="11"
               fontWeight="bold"
               filter="url(#glow)"
             >
@@ -191,7 +183,7 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl, hig
             cy={currentPoint.y}
             r="6"
             fill={pnl >= 0 ? "#10b981" : "#ef4444"}
-            stroke={theme === 'dark' ? 'white' : '#1f2937'}
+            stroke="white"
             strokeWidth="2"
             filter="url(#glow)"
           />
@@ -201,14 +193,14 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl, hig
         {highLow && highLow.high && highLow.low && (
           <g>
             {/* High line indicator */}
-            <line x1="50" y1="30" x2="550" y2="30" stroke={theme === 'dark' ? '#10b981' : '#059669'} strokeWidth="1" opacity="0.7" strokeDasharray="4" />
-            <text x="555" y="35" fontSize="11" fill={theme === 'dark' ? '#10b981' : '#059669'} opacity="1" fontWeight="bold">
+            <line x1="50" y1="30" x2="550" y2="30" stroke="#10b981" strokeWidth="2" opacity="0.8" strokeDasharray="5,3" />
+            <text x="555" y="35" fontSize="12" fill="#10b981" opacity="1" fontWeight="bold" fontFamily="monospace">
               H: ${highLow.high.toFixed(0)}
             </text>
 
             {/* Low line indicator */}
-            <line x1="50" y1="220" x2="550" y2="220" stroke={theme === 'dark' ? '#ef4444' : '#991b1b'} strokeWidth="1" opacity="0.7" strokeDasharray="4" />
-            <text x="555" y="225" fontSize="11" fill={theme === 'dark' ? '#ef4444' : '#991b1b'} opacity="1" fontWeight="bold">
+            <line x1="50" y1="220" x2="550" y2="220" stroke="#ef4444" strokeWidth="2" opacity="0.8" strokeDasharray="5,3" />
+            <text x="555" y="225" fontSize="12" fill="#ef4444" opacity="1" fontWeight="bold" fontFamily="monospace">
               L: ${highLow.low.toFixed(0)}
             </text>
           </g>

@@ -915,7 +915,6 @@ const App = () => {
             currentPrice={state.prices[state.selectedMarket]}
             pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
             highLow={state.liveHighLow[state.selectedMarket]}
-            theme={state.theme}
           />
           <DirectionSelector
             direction={state.direction}
@@ -1012,7 +1011,6 @@ const App = () => {
                     currentPrice={state.prices[state.selectedMarket]}
                     pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
                     highLow={state.liveHighLow[state.selectedMarket]}
-                    theme={state.theme}
                   />
                 </div>
               </div>
