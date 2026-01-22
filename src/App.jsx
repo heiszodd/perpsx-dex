@@ -7,8 +7,39 @@ import AlivePriceChart from './components/AlivePriceChart';
 const AppContext = createContext();
 
 const useAppState = () => {
-  const [balance, setBalance] = useState(1000);
-  
+  // Initialize from localStorage or use defaults
+  const getInitialState = () => {
+    try {
+      const saved = localStorage.getItem('perpsx_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        console.log('✅ Loaded trading state from cache');
+        return parsed;
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to load cached state:', error);
+    }
+    return null;
+  };
+
+  const initialState = getInitialState();
+  const [balance, setBalance] = useState(initialState?.balance ?? 1000);
+  const [selectedMarket, setSelectedMarket] = useState(initialState?.selectedMarket ?? 'BTC');
+  const [positions, setPositions] = useState(initialState?.positions ?? []);
+  const [direction, setDirection] = useState(initialState?.direction ?? 'LONG');
+  const [positionSize, setPositionSize] = useState(initialState?.positionSize ?? 50);
+  const [riskMode, setRiskMode] = useState(initialState?.riskMode ?? 'BALANCED');
+  const [showAdvanced, setShowAdvanced] = useState(initialState?.showAdvanced ?? false);
+  const [advancedSettings, setAdvancedSettings] = useState(
+    initialState?.advancedSettings ?? {
+      orderType: 'MARKET',
+      limitPrice: '',
+      customLeverage: '',
+      takeProfit: '',
+      stopLoss: ''
+    }
+  );
+
   // Use CoinGecko API for live prices (polls every 4 seconds, max 50 history points)
   const { prices: livePrices, priceHistory: liveHistory, error: priceError } = useLivePrices(
     ['bitcoin', 'ethereum', 'solana'],
@@ -31,19 +62,6 @@ const useAppState = () => {
   // Use live prices if available, fallback otherwise
   const prices = (livePrices.BTC && livePrices.ETH && livePrices.SOL) ? livePrices : fallbackPrices;
   const priceHistory = (liveHistory.BTC && liveHistory.BTC.length > 0) ? liveHistory : fallbackHistory;
-  const [selectedMarket, setSelectedMarket] = useState('BTC');
-  const [positions, setPositions] = useState([]);
-  const [direction, setDirection] = useState('LONG');
-  const [positionSize, setPositionSize] = useState(50);
-  const [riskMode, setRiskMode] = useState('BALANCED');
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [advancedSettings, setAdvancedSettings] = useState({
-    orderType: 'MARKET', // MARKET or LIMIT
-    limitPrice: '',
-    customLeverage: '',
-    takeProfit: '',
-    stopLoss: ''
-  });
 
   // Map risk modes to leverage
   const leverageMap = {
@@ -52,7 +70,26 @@ const useAppState = () => {
     DEGENERATE: 10
   };
 
-  // Update fallback prices if API fails (emit warning)
+  // Auto-save state to localStorage
+  useEffect(() => {
+    const stateToSave = {
+      balance,
+      selectedMarket,
+      positions,
+      direction,
+      positionSize,
+      riskMode,
+      showAdvanced,
+      advancedSettings,
+      lastSaved: new Date().toISOString()
+    };
+    
+    try {
+      localStorage.setItem('perpsx_state', JSON.stringify(stateToSave));
+    } catch (error) {
+      console.warn('⚠️ Failed to save state to cache:', error);
+    }
+  }, [balance, selectedMarket, positions, direction, positionSize, riskMode, showAdvanced, advancedSettings]);
   useEffect(() => {
     if (priceError) {
       console.warn('⚠️ CoinGecko API error - using demo prices:', priceError);
@@ -274,6 +311,19 @@ const useAppState = () => {
     console.log(`✅ Closed all positions. Total margin returned: $${totalMargin.toFixed(2)}, Total PnL: ${totalPnL >= 0 ? '+' : ''}$${totalPnL.toFixed(2)}`);
   };
 
+  const resetState = () => {
+    if (window.confirm('🔄 Clear all data and reset to defaults? This cannot be undone.')) {
+      try {
+        localStorage.removeItem('perpsx_state');
+        console.log('✅ Cache cleared');
+        // Reload page to reset all state
+        window.location.reload();
+      } catch (error) {
+        console.error('Failed to clear cache:', error);
+      }
+    }
+  };
+
   return {
     balance,
     prices,
@@ -293,12 +343,13 @@ const useAppState = () => {
     setAdvancedSettings,
     openPosition,
     closePosition,
-    closeAllPositions
+    closeAllPositions,
+    resetState
   };
 };
 
 // Components
-const Header = ({ balance, positions }) => {
+const Header = ({ balance, positions, onReset }) => {
   const totalUnrealizedPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
   const liveBalance = balance + totalUnrealizedPnL;
   const balanceColor = totalUnrealizedPnL >= 0 ? 'text-green-500' : 'text-red-500';
@@ -319,6 +370,13 @@ const Header = ({ balance, positions }) => {
             Base: ${balance.toFixed(2)}
           </div>
         )}
+        <button
+          onClick={onReset}
+          className="text-xs text-gray-400 hover:text-gray-300 mt-2 transition-colors"
+          title="Clear all data and reset to defaults"
+        >
+          Reset
+        </button>
       </div>
     </div>
   );
@@ -768,7 +826,7 @@ const App = () => {
       <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white">
         {/* Mobile / Portrait Layout */}
         <div className="lg:hidden max-w-md mx-auto p-6 py-8">
-          <Header balance={state.balance} positions={state.positions} />
+          <Header balance={state.balance} positions={state.positions} onReset={state.resetState} />
           <MarketSelector 
             selectedMarket={state.selectedMarket}
             setSelectedMarket={state.setSelectedMarket}
@@ -835,7 +893,7 @@ const App = () => {
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 h-full">
             {/* Left Panel: Chart & Market Info */}
             <div className="xl:col-span-2 flex flex-col gap-4">
-              <Header balance={state.balance} positions={state.positions} />
+              <Header balance={state.balance} positions={state.positions} onReset={state.resetState} />
               
               {/* Market Selector */}
               <div className="bg-gray-800/50 rounded-2xl p-4">
