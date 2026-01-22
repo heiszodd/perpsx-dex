@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useTradingEngine } from './hooks/useTradingEngine';
+import AlivePriceChart from './components/AlivePriceChart';
 
 // Context for global state
 const AppContext = createContext();
@@ -9,6 +11,11 @@ const useAppState = () => {
     BTC: null,
     ETH: null,
     SOL: null
+  });
+  const [priceHistory, setPriceHistory] = useState({
+    BTC: [],
+    ETH: [],
+    SOL: []
   });
   const [selectedMarket, setSelectedMarket] = useState('BTC');
   const [positions, setPositions] = useState([]);
@@ -43,17 +50,34 @@ const useAppState = () => {
         const ethData = await ethRes.json();
         const solData = await solRes.json();
         
-        setPrices({
+        const initialPrices = {
           BTC: parseFloat(btcData.price),
           ETH: parseFloat(ethData.price),
           SOL: parseFloat(solData.price)
+        };
+
+        setPrices(initialPrices);
+
+        // Initialize price history with initial prices
+        setPriceHistory({
+          BTC: [initialPrices.BTC],
+          ETH: [initialPrices.ETH],
+          SOL: [initialPrices.SOL]
         });
       } catch (error) {
         console.error('Failed to fetch prices:', error);
-        setPrices({
+        const fallbackPrices = {
           BTC: 95000,
           ETH: 3500,
           SOL: 140
+        };
+        setPrices(fallbackPrices);
+
+        // Initialize price history with fallback prices
+        setPriceHistory({
+          BTC: [fallbackPrices.BTC],
+          ETH: [fallbackPrices.ETH],
+          SOL: [fallbackPrices.SOL]
         });
       }
     };
@@ -66,12 +90,21 @@ const useAppState = () => {
     const interval = setInterval(() => {
       setPrices(prev => {
         if (!prev.BTC) return prev;
-        
-        return {
+
+        const newPrices = {
           BTC: prev.BTC * (1 + (Math.random() - 0.5) * 0.002), // ±0.2% movement
           ETH: prev.ETH * (1 + (Math.random() - 0.5) * 0.003), // ±0.3% movement
           SOL: prev.SOL * (1 + (Math.random() - 0.5) * 0.004)  // ±0.4% movement
         };
+
+        // Update price history
+        setPriceHistory(prevHistory => ({
+          BTC: [...prevHistory.BTC, newPrices.BTC].slice(-50), // Keep last 50 prices
+          ETH: [...prevHistory.ETH, newPrices.ETH].slice(-50),
+          SOL: [...prevHistory.SOL, newPrices.SOL].slice(-50)
+        }));
+
+        return newPrices;
       });
     }, 2000);
 
@@ -81,88 +114,121 @@ const useAppState = () => {
   // Update unrealized PnL for all positions
   useEffect(() => {
     if (positions.length > 0 && prices.BTC) {
-      setPositions(prevPositions => 
-        prevPositions.map(pos => {
+      setPositions(prevPositions => {
+        const closedPositions = [];
+
+        // In one pass: update PnL, detect closures, collect closed positions
+        const updatedPositions = prevPositions.map(pos => {
           const currentPrice = prices[pos.market];
           const priceDiff = currentPrice - pos.entryPrice;
           const multiplier = pos.direction === 'LONG' ? 1 : -1;
-          const leverage = pos.leverage;
-          const pnl = (priceDiff / pos.entryPrice) * pos.size * leverage * multiplier;
-          
+          // pos.size is now notional size (riskAmount * leverage), so no need to multiply by leverage again
+          const pnl = (priceDiff / pos.entryPrice) * pos.size * multiplier;
+
           // Check take profit
           if (pos.takeProfit) {
-            const tpHit = pos.direction === 'LONG' 
-              ? currentPrice >= pos.takeProfit 
+            const tpHit = pos.direction === 'LONG'
+              ? currentPrice >= pos.takeProfit
               : currentPrice <= pos.takeProfit;
             if (tpHit) {
-              return { ...pos, unrealizedPnL: pnl, closedByTP: true };
+              const closedPos = { ...pos, unrealizedPnL: pnl, closedByTP: true };
+              closedPositions.push(closedPos);
+              return closedPos;
             }
           }
 
           // Check stop loss
           if (pos.stopLoss) {
-            const slHit = pos.direction === 'LONG' 
-              ? currentPrice <= pos.stopLoss 
+            const slHit = pos.direction === 'LONG'
+              ? currentPrice <= pos.stopLoss
               : currentPrice >= pos.stopLoss;
             if (slHit) {
-              return { ...pos, unrealizedPnL: pnl, closedBySL: true };
+              const closedPos = { ...pos, unrealizedPnL: pnl, closedBySL: true };
+              closedPositions.push(closedPos);
+              return closedPos;
             }
           }
-          
-          // Check liquidation
-          const liquidationThreshold = pos.size / leverage;
-          if (Math.abs(pnl) >= liquidationThreshold) {
-            return { ...pos, unrealizedPnL: -pos.size, liquidated: true };
-          }
-          
-          return { ...pos, unrealizedPnL: pnl };
-        })
-      );
 
-      // Remove closed positions (TP, SL, liquidation)
-      setPositions(prev => {
-        const closedPositions = prev.filter(p => p.liquidated || p.closedByTP || p.closedBySL);
+          // Check liquidation
+          const lossThreshold = pos.initialMargin - pos.maintenanceMargin;
+          if (pnl <= -lossThreshold) {
+            const closedPos = { ...pos, unrealizedPnL: -pos.size, liquidated: true };
+            closedPositions.push(closedPos);
+            return closedPos;
+          }
+
+          return { ...pos, unrealizedPnL: pnl };
+        });
+
+        // Externally compute balance adjustments from closed positions
         if (closedPositions.length > 0) {
-          const totalPnL = closedPositions.reduce((sum, p) => {
-            if (p.liquidated) return sum - p.size;
-            return sum + p.unrealizedPnL;
+          const totalReturn = closedPositions.reduce((sum, p) => {
+            if (p.liquidated) {
+              // For liquidation: return margin + negative PnL (which is -positionSize)
+              return sum + p.initialMargin + p.unrealizedPnL;
+            }
+            // For TP/SL: return margin + PnL
+            return sum + p.initialMargin + p.unrealizedPnL;
           }, 0);
-          setBalance(b => b + totalPnL);
-          return prev.filter(p => !p.liquidated && !p.closedByTP && !p.closedBySL);
+          setBalance(b => b + totalReturn);
+
+          // Log liquidation events
+          closedPositions.forEach(p => {
+            if (p.liquidated) {
+              console.log(`💥 Position liquidated! ${p.direction} ${p.size} at ${p.leverage}x leverage. Loss: $${p.unrealizedPnL.toFixed(2)}`);
+            }
+          });
         }
-        return prev;
+
+        // Return only open positions (filter out closed ones)
+        return updatedPositions.filter(pos => !pos.liquidated && !pos.closedByTP && !pos.closedBySL);
       });
     }
-  }, [prices, positions.length]);
+  }, [prices]);
 
   const openPosition = () => {
     const currentPrice = prices[selectedMarket];
     if (!currentPrice) return;
 
     // Use custom leverage if advanced mode is on, otherwise use risk mode
-    const leverage = showAdvanced && advancedSettings.customLeverage 
+    const leverage = showAdvanced && advancedSettings.customLeverage
       ? parseFloat(advancedSettings.customLeverage)
       : leverageMap[riskMode];
+
+    const initialMargin = positionSize / leverage;
+
+    // Check if balance is sufficient
+    if (balance < initialMargin) {
+      console.log(`❌ Insufficient balance. Required: $${initialMargin.toFixed(2)}, Available: $${balance.toFixed(2)}`);
+      return;
+    }
 
     // For limit orders, check if price needs to be triggered
     if (advancedSettings.orderType === 'LIMIT' && advancedSettings.limitPrice) {
       const limitPrice = parseFloat(advancedSettings.limitPrice);
       // In real app, this would be queued. For demo, we'll just use limit as entry
       const entryPrice = limitPrice;
-      
-      const liquidationDistance = positionSize / leverage / positionSize;
-      const liquidationPrice = direction === 'LONG' 
-        ? entryPrice * (1 - liquidationDistance)
-        : entryPrice * (1 + liquidationDistance);
+
+      const riskAmount = positionSize; // positionSize now represents risk amount
+      const notionalSize = riskAmount * leverage;
+      const margin = riskAmount; // margin equals risk amount
+      const maintenanceMargin = 0; // no maintenance margin, liquidation at full loss
+      const liquidationPrice = direction === 'LONG'
+        ? entryPrice * (1 - 1/leverage) // lose full margin at liquidation
+        : entryPrice * (1 + 1/leverage);
 
       const newPosition = {
         id: Date.now(),
         market: selectedMarket,
         entryPrice: entryPrice,
         direction,
-        size: positionSize,
+        size: notionalSize, // display notional size
+        riskAmount, // store risk amount separately
         riskMode: showAdvanced ? 'CUSTOM' : riskMode,
         leverage,
+        initialMargin: margin,
+        maintenanceMargin,
+        marginUsed: margin,
         liquidationPrice,
         unrealizedPnL: 0,
         openedAt: new Date().toLocaleTimeString(),
@@ -170,24 +236,34 @@ const useAppState = () => {
         stopLoss: advancedSettings.stopLoss ? parseFloat(advancedSettings.stopLoss) : null
       };
 
+      // Atomic state update: deduct margin and add position
+      setBalance(prev => prev - margin);
       setPositions(prev => [...prev, newPosition]);
+      console.log(`✅ Opened ${direction} position: ${notionalSize} at ${leverage}x leverage. Risk: $${riskAmount.toFixed(2)}`);
       return;
     }
 
     // Market order
-    const liquidationDistance = positionSize / leverage / positionSize;
-    const liquidationPrice = direction === 'LONG' 
-      ? currentPrice * (1 - liquidationDistance)
-      : currentPrice * (1 + liquidationDistance);
+    const riskAmount = positionSize; // positionSize now represents risk amount
+    const notionalSize = riskAmount * leverage;
+    const margin = riskAmount; // margin equals risk amount
+    const maintenanceMargin = 0; // no maintenance margin, liquidation at full loss
+    const liquidationPrice = direction === 'LONG'
+      ? currentPrice * (1 - 1/leverage) // lose full margin at liquidation
+      : currentPrice * (1 + 1/leverage);
 
     const newPosition = {
       id: Date.now(),
       market: selectedMarket,
       entryPrice: currentPrice,
       direction,
-      size: positionSize,
+      size: notionalSize, // display notional size
+      riskAmount, // store risk amount separately
       riskMode: showAdvanced ? 'CUSTOM' : riskMode,
       leverage,
+      initialMargin: margin,
+      maintenanceMargin,
+      marginUsed: margin,
       liquidationPrice,
       unrealizedPnL: 0,
       openedAt: new Date().toLocaleTimeString(),
@@ -195,7 +271,10 @@ const useAppState = () => {
       stopLoss: advancedSettings.stopLoss ? parseFloat(advancedSettings.stopLoss) : null
     };
 
+    // Atomic state update: deduct margin and add position
+    setBalance(prev => prev - margin);
     setPositions(prev => [...prev, newPosition]);
+    console.log(`✅ Opened ${direction} position: ${notionalSize} at ${leverage}x leverage. Risk: $${riskAmount.toFixed(2)}`);
   };
 
   const closePosition = (positionId) => {
@@ -203,14 +282,24 @@ const useAppState = () => {
     if (!position) return;
 
     const pnl = position.unrealizedPnL;
-    setBalance(prev => prev + pnl);
+    const margin = position.initialMargin;
+
+    // Atomic state update: return margin + PnL and remove position
+    setBalance(prev => prev + margin + pnl);
     setPositions(prev => prev.filter(p => p.id !== positionId));
+
+    console.log(`✅ Closed ${position.direction} position: ${position.size} at ${position.leverage}x leverage. Margin returned: $${margin.toFixed(2)}, PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`);
   };
 
   const closeAllPositions = () => {
     const totalPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
-    setBalance(prev => prev + totalPnL);
+    const totalMargin = positions.reduce((sum, pos) => sum + pos.initialMargin, 0);
+
+    // Atomic state update: return all margin + total PnL and clear positions
+    setBalance(prev => prev + totalMargin + totalPnL);
     setPositions([]);
+
+    console.log(`✅ Closed all positions. Total margin returned: $${totalMargin.toFixed(2)}, Total PnL: ${totalPnL >= 0 ? '+' : ''}$${totalPnL.toFixed(2)}`);
   };
 
   return {
@@ -420,16 +509,18 @@ const AdvancedSettings = ({ advancedSettings, setAdvancedSettings, selectedMarke
     const tp = parseFloat(advancedSettings.takeProfit);
     const priceDiff = tp - entryPrice;
     const multiplier = direction === 'LONG' ? 1 : -1;
-    return (priceDiff / entryPrice) * positionSize * leverage * multiplier;
+    const notionalSize = positionSize * leverage; // positionSize is now riskAmount
+    return (priceDiff / entryPrice) * notionalSize * multiplier;
   };
-  
+
   // Calculate PnL at Stop Loss price
   const calculateSLPnL = () => {
     if (!advancedSettings.stopLoss || !entryPrice) return null;
     const sl = parseFloat(advancedSettings.stopLoss);
     const priceDiff = sl - entryPrice;
     const multiplier = direction === 'LONG' ? 1 : -1;
-    return (priceDiff / entryPrice) * positionSize * leverage * multiplier;
+    const notionalSize = positionSize * leverage; // positionSize is now riskAmount
+    return (priceDiff / entryPrice) * notionalSize * multiplier;
   };
   
   const tpPnL = calculateTPPnL();
@@ -544,10 +635,9 @@ const ActionButtons = ({ openPosition, selectedMarket, prices, direction, positi
     ? parseFloat(advancedSettings.limitPrice)
     : currentPrice;
 
-  const liquidationDistance = positionSize / leverage / positionSize;
-  const liquidationPrice = entryPrice && direction === 'LONG' 
-    ? entryPrice * (1 - liquidationDistance)
-    : entryPrice && entryPrice * (1 + liquidationDistance);
+  const liquidationPrice = entryPrice && direction === 'LONG'
+    ? entryPrice * (1 - 1/leverage) // lose full risk amount at liquidation
+    : entryPrice && entryPrice * (1 + 1/leverage);
 
   return (
     <div className="mb-8 space-y-4">
@@ -710,12 +800,19 @@ const App = () => {
             setSelectedMarket={state.setSelectedMarket}
             prices={state.prices}
           />
-          <MarketPrice 
+          <MarketPrice
             market={state.selectedMarket}
-            price={state.prices[state.selectedMarket]} 
+            price={state.prices[state.selectedMarket]}
           />
-          <DirectionSelector 
-            direction={state.direction} 
+          <AlivePriceChart
+            prices={state.priceHistory[state.selectedMarket]}
+            direction={state.direction === 'LONG' ? 'UP' : 'DOWN'}
+            entryPrice={state.positions.length > 0 ? state.positions[0].entryPrice : null}
+            currentPrice={state.prices[state.selectedMarket]}
+            pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
+          />
+          <DirectionSelector
+            direction={state.direction}
             setDirection={state.setDirection}
           />
           <PositionSizeSelector 
