@@ -2,16 +2,16 @@ import { useState, useEffect, useCallback } from 'react';
 
 /**
  * Custom hook for fetching real-time crypto prices
- * Uses Kraken free API (most reliable free tier with 1-second updates)
+ * Uses CoinGecko free API (no API key required)
  * @param {Array} symbols - Array of crypto symbols (e.g., ['bitcoin', 'ethereum', 'solana'])
  * @param {number} pollInterval - Polling interval in milliseconds (default: 1000ms)
- * @param {number} maxHistoryPoints - Maximum number of historical price points to keep (default: 14400 for 4 hours)
+ * @param {number} maxHistoryPoints - Maximum number of historical price points to keep (default: 3600 for 1 hour)
  * @returns {Object} - { prices, priceHistory, isLoading, error, lastFetchTime, highLow }
  */
 export const useLivePrices = (
   symbols = ['bitcoin', 'ethereum', 'solana'],
   pollInterval = 1000,
-  maxHistoryPoints = 14400  // 4 hours at 1-second intervals
+  maxHistoryPoints = 3600  // 1 hour at 1-second intervals
 ) => {
   const [prices, setPrices] = useState({
     BTC: null,
@@ -35,23 +35,22 @@ export const useLivePrices = (
   const [error, setError] = useState(null);
   const [lastFetchTime, setLastFetchTime] = useState(null);
 
-  // Map Kraken pair names to our internal symbols
+  // Map CoinGecko IDs to our internal symbols
   const symbolMap = {
-    'XXBTZUSD': 'BTC',
-    'XETHZUSD': 'ETH',
-    'XSOLZUSD': 'SOL'
+    'bitcoin': 'BTC',
+    'ethereum': 'ETH',
+    'solana': 'SOL'
   };
 
   /**
-   * Fetch prices from Kraken free API
-   * Uses Ticker endpoint which gives best bid/ask (most reliable free tier)
+   * Fetch prices from CoinGecko free API
+   * No authentication required, generous rate limits
    */
   const fetchPrices = useCallback(async () => {
     try {
-      // Kraken free API endpoint - most reliable for frequent updates
-      // Using multiple requests for each pair to be safe
-      const pairs = ['XXBTZUSD', 'XETHZUSD', 'XSOLZUSD'];
-      const url = `https://api.kraken.com/0/public/Ticker?pair=${pairs.join(',')}`;
+      // CoinGecko free API endpoint
+      const ids = ['bitcoin', 'ethereum', 'solana'];
+      const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd`;
 
       const response = await fetch(url, {
         method: 'GET',
@@ -59,24 +58,19 @@ export const useLivePrices = (
       });
 
       if (!response.ok) {
-        throw new Error(`Kraken API error: ${response.status}`);
+        throw new Error(`CoinGecko API error: ${response.status}`);
       }
 
       const data = await response.json();
-
-      if (data.error && data.error.length > 0) {
-        throw new Error(data.error[0]);
-      }
 
       // Transform API response to our format
       const newPrices = {};
       const currentTime = Date.now();
 
-      Object.entries(data.result || {}).forEach(([pair, tickerData]) => {
-        const symbol = symbolMap[pair];
-        if (symbol && tickerData && tickerData.a) {
-          // Use ask price (most accurate for bid/ask)
-          const price = parseFloat(tickerData.a[0]);
+      Object.entries(data).forEach(([id, priceData]) => {
+        const symbol = symbolMap[id];
+        if (symbol && priceData.usd) {
+          const price = parseFloat(priceData.usd);
           newPrices[symbol] = price;
         }
       });
@@ -102,7 +96,7 @@ export const useLivePrices = (
           return newHistory;
         });
 
-        // Calculate 4-hour high/low
+        // Calculate high/low
         setHighLow(prevHighLow => {
           const newHighLow = { ...prevHighLow };
 
@@ -121,7 +115,7 @@ export const useLivePrices = (
           return newHighLow;
         });
 
-        console.log('✅ Kraken prices updated:', newPrices);
+        console.log('✅ CoinGecko prices updated:', newPrices);
       }
 
       // Clear any previous errors and update status
@@ -131,7 +125,7 @@ export const useLivePrices = (
 
     } catch (err) {
       // Handle API failures gracefully
-      console.error('🚨 Kraken API fetch failed:', err.message);
+      console.error('🚨 CoinGecko API fetch failed:', err.message);
 
       // Set error state but don't clear existing prices
       setError(err.message);

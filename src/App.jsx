@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useTradingEngine } from './hooks/useTradingEngine';
 import { useLivePrices } from './hooks/useLivePrices';
 
 // Theme-aware utility
@@ -64,34 +63,20 @@ const useAppState = () => {
     }
   );
 
-  // Use Kraken free API for live prices (polls every 1 second for real-time sync, 4 hours history)
-  const { prices: livePrices, priceHistory: liveHistory, highLow: liveHighLow, error: priceError } = useLivePrices(
+  // Removed fallback price state variables
+
+  // Use Kraken free API for live prices (polls every 4 seconds, 50 history points)
+  const { prices, priceHistory, isLoading: pricesLoading, error: priceError, lastFetchTime } = useLivePrices(
     ['bitcoin', 'ethereum', 'solana'],
-    1000,
-    14400  // 4 hours at 1-second intervals
+    1000,  // Poll every 4 seconds
+    150     // Keep 50 history points
   );
-  
-  // Fallback to local state if API fails
-  const [fallbackPrices, setFallbackPrices] = useState({
-    BTC: 95000,
-    ETH: 3500,
-    SOL: 140
-  });
-  const [fallbackHistory, setFallbackHistory] = useState({
-    BTC: [95000],
-    ETH: [3500],
-    SOL: [140]
-  });
-  
-  // Use live prices if available, fallback otherwise
-  const prices = (livePrices.BTC && livePrices.ETH && livePrices.SOL) ? livePrices : fallbackPrices;
-  const priceHistory = (liveHistory.BTC && liveHistory.BTC.length > 0) ? liveHistory : fallbackHistory;
 
   // Map risk modes to leverage
   const leverageMap = {
-    SAFE: 2,
-    BALANCED: 5,
-    DEGENERATE: 10
+    SAFE: 10,
+    BALANCED: 50,
+    DEGENERATE: 200
   };
 
   // Calculate total margin used by open positions
@@ -125,27 +110,7 @@ const useAppState = () => {
     }
   }, [priceError]);
   
-  // Add slight random jitter to fallback prices for demo mode
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!livePrices.BTC || !livePrices.ETH || !livePrices.SOL) {
-        // Only add jitter if using fallback prices (live prices already updating via API)
-        setFallbackPrices(prev => ({
-          BTC: prev.BTC * (1 + (Math.random() - 0.5) * 0.0005),
-          ETH: prev.ETH * (1 + (Math.random() - 0.5) * 0.0005),
-          SOL: prev.SOL * (1 + (Math.random() - 0.5) * 0.0005)
-        }));
-        
-        setFallbackHistory(prevHistory => ({
-          BTC: [...prevHistory.BTC, fallbackPrices.BTC].slice(-50),
-          ETH: [...prevHistory.ETH, fallbackPrices.ETH].slice(-50),
-          SOL: [...prevHistory.SOL, fallbackPrices.SOL].slice(-50)
-        }));
-      }
-    }, 1000);
 
-    return () => clearInterval(interval);
-  }, [livePrices.BTC, livePrices.ETH, livePrices.SOL, fallbackPrices]);
 
   // Update unrealized PnL for all positions
   useEffect(() => {
@@ -185,12 +150,12 @@ const useAppState = () => {
             }
           }
 
-          // Check liquidation: loss equals exactly the risk amount at liquidation
+          // Check liquidation: loss equals maintenance margin
           // unrealizedPnL = (priceDiff / entryPrice) * notionalSize * multiplier
-          // At liquidation: unrealizedPnL = -riskAmount (since notionalSize = riskAmount * leverage)
-          const riskAmount = pos.riskAmount || pos.initialMargin;
-          if (pnl <= -riskAmount) {
-            const closedPos = { ...pos, unrealizedPnL: -riskAmount, liquidated: true };
+          // At liquidation: unrealizedPnL = -(initialMargin - maintenanceMargin) = -initialMargin * 0.5
+          const liquidationThreshold = -(pos.initialMargin - pos.maintenanceMargin);
+          if (pnl <= liquidationThreshold) {
+            const closedPos = { ...pos, unrealizedPnL: liquidationThreshold, liquidated: true };
             closedPositions.push(closedPos);
             return closedPos;
           }
@@ -246,26 +211,24 @@ const useAppState = () => {
       // In real app, this would be queued. For demo, we'll just use limit as entry
       const entryPrice = limitPrice;
 
-      const riskAmount = positionSize; // positionSize now represents risk amount
-      const notionalSize = riskAmount * leverage;
-      const margin = riskAmount; // margin equals risk amount
-      const maintenanceMargin = 0; // no maintenance margin, liquidation at full loss
+      const maintenanceMargin = initialMargin * 0.5;
+      const marginUsed = initialMargin;
+      const liquidationDistance = 0.5 / leverage;
       const liquidationPrice = direction === 'LONG'
-        ? entryPrice * (1 - 1/leverage) // lose full margin at liquidation
-        : entryPrice * (1 + 1/leverage);
+        ? entryPrice * (1 - liquidationDistance)
+        : entryPrice * (1 + liquidationDistance);
 
       const newPosition = {
         id: Date.now(),
         market: selectedMarket,
         entryPrice: entryPrice,
         direction,
-        size: notionalSize, // display notional size
-        riskAmount, // store risk amount separately
+        size: positionSize * leverage, // notional size
         riskMode: showAdvanced ? 'CUSTOM' : riskMode,
         leverage,
-        initialMargin: margin,
+        initialMargin,
         maintenanceMargin,
-        marginUsed: margin,
+        marginUsed,
         liquidationPrice,
         unrealizedPnL: 0,
         openedAt: new Date().toLocaleTimeString(),
@@ -280,26 +243,24 @@ const useAppState = () => {
     }
 
     // Market order
-    const riskAmount = positionSize; // positionSize now represents risk amount
-    const notionalSize = riskAmount * leverage;
-    const margin = riskAmount; // margin equals risk amount
-    const maintenanceMargin = 0; // no maintenance margin, liquidation at full loss
+    const maintenanceMargin = initialMargin * 0.5;
+    const marginUsed = initialMargin;
+    const liquidationDistance = 0.5 / leverage;
     const liquidationPrice = direction === 'LONG'
-      ? currentPrice * (1 - 1/leverage) // lose full margin at liquidation
-      : currentPrice * (1 + 1/leverage);
+      ? currentPrice * (1 - liquidationDistance)
+      : currentPrice * (1 + liquidationDistance);
 
     const newPosition = {
       id: Date.now(),
       market: selectedMarket,
       entryPrice: currentPrice,
       direction,
-      size: notionalSize, // display notional size
-      riskAmount, // store risk amount separately
+      size: positionSize * leverage, // notional size
       riskMode: showAdvanced ? 'CUSTOM' : riskMode,
       leverage,
-      initialMargin: margin,
+      initialMargin,
       maintenanceMargin,
-      marginUsed: margin,
+      marginUsed,
       liquidationPrice,
       unrealizedPnL: 0,
       openedAt: new Date().toLocaleTimeString(),
@@ -352,8 +313,6 @@ const useAppState = () => {
     balance,
     prices,
     priceHistory,
-    livePrices,
-    liveHighLow,
     selectedMarket,
     setSelectedMarket,
     positions,
@@ -386,10 +345,9 @@ const Header = ({ balance, positions, onReset, theme, onThemeChange, totalMargin
     <div className="flex justify-between items-center mb-8">
       <div>
         <h1 className="text-2xl font-bold">PerpsX</h1>
-        <span className="text-xs uppercase tracking-wider opacity-60">Demo Mode</span>
       </div>
       <div className="text-right">
-        <div className="text-xs opacity-60 mb-1">Demo Balance</div>
+        <div className="text-xs opacity-60 mb-1">Balance</div>
         <div className={`text-2xl font-bold transition-colors ${positions.length > 0 ? balanceColor : ''}`}>
           ${liveBalance.toFixed(2)}
         </div>
@@ -455,7 +413,7 @@ const MarketPrice = ({ market, price, isLive = true }) => (
           ? 'bg-green-500/20 text-green-400' 
           : 'bg-yellow-500/20 text-yellow-400'
       }`}>
-        {isLive ? '🟢 LIVE' : '🟡 DEMO'}
+        {isLive ? '🟢 LIVE' : '🟡 LOADING'}
       </div>
     </div>
     <div className="text-4xl font-bold text-white">
@@ -905,7 +863,7 @@ const App = () => {
           <MarketPrice
             market={state.selectedMarket}
             price={state.prices[state.selectedMarket]}
-            isLive={!!(state.livePrices.BTC && state.livePrices.ETH && state.livePrices.SOL)}
+            isLive={!!(state.prices.BTC && state.prices.ETH && state.prices.SOL)}
           />
           <DirectionSelector
             direction={state.direction}
@@ -987,11 +945,11 @@ const App = () => {
 
               {/* Market Price Display */}
               <div className="bg-gray-800/30 rounded-2xl p-6 flex-shrink-0">
-                <MarketPrice
-                  market={state.selectedMarket}
-                  price={state.prices[state.selectedMarket]}
-                  isLive={!!(state.livePrices.BTC && state.livePrices.ETH && state.livePrices.SOL)}
-                />
+          <MarketPrice
+            market={state.selectedMarket}
+            price={state.prices[state.selectedMarket]}
+            isLive={!!(state.prices.BTC && state.prices.ETH && state.prices.SOL)}
+          />
               </div>
             </div>
 
