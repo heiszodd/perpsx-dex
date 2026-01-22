@@ -849,6 +849,9 @@ const PositionsList = ({ positions, closePosition, closeAllPositions }) => {
 const App = () => {
   const state = useAppState();
   
+  // Calculate total margin used (same calculation as in useAppState)
+  const totalMarginUsed = state.positions.reduce((sum, pos) => sum + pos.initialMargin, 0);
+  
   // Apply theme to document
   useEffect(() => {
     const isDark = state.theme === 'dark';
