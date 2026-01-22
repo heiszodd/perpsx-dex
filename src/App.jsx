@@ -3,6 +3,30 @@ import { useTradingEngine } from './hooks/useTradingEngine';
 import { useLivePrices } from './hooks/useLivePrices';
 import AlivePriceChart from './components/AlivePriceChart';
 
+// Theme-aware utility
+const getThemeClasses = (theme) => ({
+  bg: {
+    primary: theme === 'dark' ? 'bg-gray-900' : 'bg-white',
+    secondary: theme === 'dark' ? 'bg-gray-800/50' : 'bg-gray-100/60',
+    tertiary: theme === 'dark' ? 'bg-gray-800/30' : 'bg-gray-50/40',
+  },
+  text: {
+    primary: theme === 'dark' ? 'text-white' : 'text-gray-900',
+    secondary: theme === 'dark' ? 'text-gray-400' : 'text-gray-600',
+    tertiary: theme === 'dark' ? 'text-gray-500' : 'text-gray-500',
+  },
+  border: theme === 'dark' ? 'border-gray-700/50' : 'border-gray-200/60',
+  input: {
+    bg: theme === 'dark' ? 'bg-gray-800' : 'bg-white',
+    text: theme === 'dark' ? 'text-white' : 'text-gray-900',
+    border: theme === 'dark' ? 'border-gray-700' : 'border-gray-300',
+    placeholder: theme === 'dark' ? 'placeholder-gray-500' : 'placeholder-gray-400',
+  },
+  button: {
+    ghost: theme === 'dark' ? 'bg-gray-800 text-gray-400 hover:bg-gray-700' : 'bg-gray-200 text-gray-600 hover:bg-gray-300',
+  },
+});
+
 // Context for global state
 const AppContext = createContext();
 
@@ -41,11 +65,11 @@ const useAppState = () => {
     }
   );
 
-  // Use CoinGecko API for live prices (polls every 1 second for real-time sync, max 50 history points)
-  const { prices: livePrices, priceHistory: liveHistory, error: priceError } = useLivePrices(
+  // Use Kraken free API for live prices (polls every 1 second for real-time sync, 4 hours history)
+  const { prices: livePrices, priceHistory: liveHistory, highLow: liveHighLow, error: priceError } = useLivePrices(
     ['bitcoin', 'ethereum', 'solana'],
     1000,
-    50
+    14400  // 4 hours at 1-second intervals
   );
   
   // Fallback to local state if API fails
@@ -205,10 +229,9 @@ const useAppState = () => {
     const currentPrice = prices[selectedMarket];
     if (!currentPrice) return;
 
-    // Use custom leverage if advanced mode is on, otherwise use risk mode
-    const leverage = showAdvanced && advancedSettings.customLeverage
-      ? parseFloat(advancedSettings.customLeverage)
-      : leverageMap[riskMode];
+    // Use custom leverage if advanced mode is on and leverage is set, otherwise use risk mode
+    const customLev = showAdvanced && advancedSettings.customLeverage ? parseFloat(advancedSettings.customLeverage) : null;
+    const leverage = customLev && customLev > 0 ? customLev : leverageMap[riskMode];
 
     const initialMargin = positionSize / leverage;
 
@@ -331,6 +354,7 @@ const useAppState = () => {
     prices,
     priceHistory,
     livePrices,
+    liveHighLow,
     selectedMarket,
     setSelectedMarket,
     positions,
@@ -372,7 +396,7 @@ const Header = ({ balance, positions, onReset, theme, onThemeChange, totalMargin
         </div>
         {positions.length > 0 && (
           <div className="text-xs opacity-60 mt-1">
-            Margin: ${totalMarginUsed.toFixed(2)} / ${balance.toFixed(2)}
+            Margin Available: ${(balance - totalMarginUsed).toFixed(2)}
           </div>
         )}
         <div className="flex gap-2 mt-2 justify-end">
@@ -890,6 +914,8 @@ const App = () => {
             entryPrice={state.positions.length > 0 ? state.positions[0].entryPrice : null}
             currentPrice={state.prices[state.selectedMarket]}
             pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
+            highLow={state.liveHighLow[state.selectedMarket]}
+            theme={state.theme}
           />
           <DirectionSelector
             direction={state.direction}
@@ -985,6 +1011,8 @@ const App = () => {
                     entryPrice={state.positions.length > 0 ? state.positions[0].entryPrice : null}
                     currentPrice={state.prices[state.selectedMarket]}
                     pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
+                    highLow={state.liveHighLow[state.selectedMarket]}
+                    theme={state.theme}
                   />
                 </div>
               </div>

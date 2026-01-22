@@ -3,14 +3,76 @@
 @tailwind utilities;
 
 @layer base {
-  /* Light mode styles */
+  /* Light mode styles - high contrast */
+  html.light {
+    color-scheme: light;
+  }
+
   html.light body {
-    @apply bg-gradient-to-br from-gray-50 via-white to-gray-100 text-gray-900;
+    @apply bg-gradient-to-br from-white via-gray-50 to-white text-gray-900;
+  }
+
+  html.light input,
+  html.light textarea,
+  html.light select {
+    @apply bg-white text-gray-900 border-gray-300 placeholder-gray-500;
+  }
+
+  html.light input:focus,
+  html.light textarea:focus,
+  html.light select:focus {
+    @apply border-blue-500 ring-blue-400/30 ring-2;
+  }
+
+  html.light button {
+    @apply text-gray-900;
+  }
+
+  /* Light mode color overrides - direct values to avoid circular deps */
+  html.light .bg-gray-950 {
+    background-color: rgb(243, 244, 246);
+  }
+
+  html.light .bg-gray-900 {
+    background-color: rgb(243, 244, 246);
+  }
+
+  html.light .bg-gray-800 {
+    background-color: rgb(229, 231, 235);
+  }
+
+  html.light .bg-gray-700 {
+    background-color: rgb(209, 213, 219);
+  }
+
+  html.light .text-white {
+    color: rgb(17, 24, 39);
+  }
+
+  html.light .text-gray-400 {
+    color: rgb(75, 85, 99);
+  }
+
+  html.light .text-gray-500 {
+    color: rgb(75, 85, 99);
+  }
+
+  html.light .border-gray-700 {
+    border-color: rgb(209, 213, 219);
+  }
+
+  html.light .border-gray-600 {
+    border-color: rgb(229, 231, 235);
   }
 
   /* Dark mode styles (default) */
   html.dark body, body {
     @apply bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white;
+  }
+
+  html.dark input,
+  html.dark textarea {
+    @apply bg-gray-800 text-white border-gray-700;
   }
 
   body {

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 
-const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) => {
+const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl, highLow, theme = 'dark' }) => {
   // Normalize prices to fit within SVG bounds
   const normalizedData = useMemo(() => {
     if (!prices || prices.length === 0) return [];
@@ -42,10 +42,19 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
     return path;
   }, [normalizedData]);
 
-  // Determine gradient colors based on direction
+  // Determine gradient colors based on direction and theme
   const gradientColors = direction === 'UP'
-    ? { start: '#3b82f6', end: '#8b5cf6' } // blue to purple
-    : { start: '#ef4444', end: '#f97316' }; // red to orange
+    ? { 
+        start: theme === 'dark' ? '#3b82f6' : '#1e40af', 
+        end: theme === 'dark' ? '#8b5cf6' : '#6d28d9' 
+      }
+    : { 
+        start: theme === 'dark' ? '#ef4444' : '#991b1b', 
+        end: theme === 'dark' ? '#f97316' : '#c2410c' 
+      };
+
+  // Chart background color based on theme
+  const chartBg = theme === 'dark' ? 'rgba(31, 41, 55, 0.5)' : 'rgba(243, 244, 246, 0.7)';
 
   // Calculate entry point and current price positions
   const entryPoint = useMemo(() => {
@@ -85,7 +94,9 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
   }, [prices, currentPrice]);
 
   return (
-    <div className="w-full h-full min-h-96 flex items-center justify-center bg-gray-950/50 rounded-lg overflow-hidden">
+    <div className={`w-full h-full min-h-96 flex items-center justify-center rounded-lg overflow-hidden ${
+      theme === 'dark' ? 'bg-gray-950/50' : 'bg-gray-200/30'
+    }`}>
       <svg
         width="100%"
         height="100%"
@@ -111,8 +122,8 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
           </filter>
         </defs>
 
-        {/* Background subtle pattern */}
-        <rect width="600" height="200" fill="url(#backgroundPattern)" opacity="0.05" />
+        {/* Background */}
+        <rect width="600" height="250" fill={chartBg} />
 
         {/* Main price line */}
         <path
@@ -128,22 +139,24 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
           }}
         />
 
-        {/* Animated pulse effect */}
-        <circle
-          cx={normalizedData[normalizedData.length - 1]?.x || 300}
-          cy={normalizedData[normalizedData.length - 1]?.y || 100}
-          r="4"
-          fill={gradientColors.end}
-          opacity="0.6"
-          className="animate-pulse"
-        >
-          <animate
-            attributeName="r"
-            values="4;6;4"
-            dur="2s"
-            repeatCount="indefinite"
-          />
-        </circle>
+        {/* Animated pulse effect - ONLY if there's a position with pnl */}
+        {pnl !== undefined && pnl !== 0 && (
+          <circle
+            cx={normalizedData[normalizedData.length - 1]?.x || 300}
+            cy={normalizedData[normalizedData.length - 1]?.y || 100}
+            r="4"
+            fill={pnl >= 0 ? '#10b981' : '#ef4444'}
+            opacity="0.6"
+            className="animate-pulse"
+          >
+            <animate
+              attributeName="r"
+              values="4;6;4"
+              dur="2s"
+              repeatCount="indefinite"
+            />
+          </circle>
+        )}
 
         {/* Entry Point Marker */}
         {entryPoint && (
@@ -153,7 +166,7 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
               cy={entryPoint.y}
               r="6"
               fill="#10b981"
-              stroke="white"
+              stroke={theme === 'dark' ? 'white' : '#1f2937'}
               strokeWidth="2"
               filter="url(#glow)"
             />
@@ -161,7 +174,7 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
               x={entryPoint.x}
               y={entryPoint.y - 15}
               textAnchor="middle"
-              fill="#10b981"
+              fill={theme === 'dark' ? '#10b981' : '#059669'}
               fontSize="10"
               fontWeight="bold"
               filter="url(#glow)"
@@ -178,10 +191,27 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
             cy={currentPoint.y}
             r="6"
             fill={pnl >= 0 ? "#10b981" : "#ef4444"}
-            stroke="white"
+            stroke={theme === 'dark' ? 'white' : '#1f2937'}
             strokeWidth="2"
             filter="url(#glow)"
           />
+        )}
+
+        {/* 4-Hour High/Low Display */}
+        {highLow && highLow.high && highLow.low && (
+          <g>
+            {/* High line indicator */}
+            <line x1="50" y1="30" x2="550" y2="30" stroke={theme === 'dark' ? '#10b981' : '#059669'} strokeWidth="1" opacity="0.7" strokeDasharray="4" />
+            <text x="555" y="35" fontSize="11" fill={theme === 'dark' ? '#10b981' : '#059669'} opacity="1" fontWeight="bold">
+              H: ${highLow.high.toFixed(0)}
+            </text>
+
+            {/* Low line indicator */}
+            <line x1="50" y1="220" x2="550" y2="220" stroke={theme === 'dark' ? '#ef4444' : '#991b1b'} strokeWidth="1" opacity="0.7" strokeDasharray="4" />
+            <text x="555" y="225" fontSize="11" fill={theme === 'dark' ? '#ef4444' : '#991b1b'} opacity="1" fontWeight="bold">
+              L: ${highLow.low.toFixed(0)}
+            </text>
+          </g>
         )}
       </svg>
     </div>

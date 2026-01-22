@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 
 /**
- * Custom hook for fetching real-time crypto prices from CoinGecko API
+ * Custom hook for fetching real-time crypto prices
+ * Uses Kraken free API (most reliable free tier with 1-second updates)
  * @param {Array} symbols - Array of crypto symbols (e.g., ['bitcoin', 'ethereum', 'solana'])
- * @param {number} pollInterval - Polling interval in milliseconds (default: 2000ms for better sync)
- * @param {number} maxHistoryPoints - Maximum number of historical price points to keep (default: 50)
- * @returns {Object} - { prices, priceHistory, isLoading, error, lastFetchTime }
+ * @param {number} pollInterval - Polling interval in milliseconds (default: 1000ms)
+ * @param {number} maxHistoryPoints - Maximum number of historical price points to keep (default: 14400 for 4 hours)
+ * @returns {Object} - { prices, priceHistory, isLoading, error, lastFetchTime, highLow }
  */
 export const useLivePrices = (
   symbols = ['bitcoin', 'ethereum', 'solana'],
-  pollInterval = 2000,
-  maxHistoryPoints = 50
+  pollInterval = 1000,
+  maxHistoryPoints = 14400  // 4 hours at 1-second intervals
 ) => {
   const [prices, setPrices] = useState({
     BTC: null,
@@ -24,26 +25,33 @@ export const useLivePrices = (
     SOL: []
   });
 
+  const [highLow, setHighLow] = useState({
+    BTC: { high: null, low: null },
+    ETH: { high: null, low: null },
+    SOL: { high: null, low: null }
+  });
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastFetchTime, setLastFetchTime] = useState(null);
 
-  // Map CoinGecko IDs to our internal symbols
+  // Map Kraken pair names to our internal symbols
   const symbolMap = {
-    bitcoin: 'BTC',
-    ethereum: 'ETH',
-    solana: 'SOL'
+    'XXBTZUSD': 'BTC',
+    'XETHZUSD': 'ETH',
+    'XSOLZUSD': 'SOL'
   };
 
   /**
-   * Fetch prices from CoinGecko API
-   * Uses the free API endpoint with no API key required
+   * Fetch prices from Kraken free API
+   * Uses Ticker endpoint which gives best bid/ask (most reliable free tier)
    */
   const fetchPrices = useCallback(async () => {
     try {
-      // CoinGecko free API endpoint for multiple coins
-      const ids = symbols.join(',');
-      const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`;
+      // Kraken free API endpoint - most reliable for frequent updates
+      // Using multiple requests for each pair to be safe
+      const pairs = ['XXBTZUSD', 'XETHZUSD', 'XSOLZUSD'];
+      const url = `https://api.kraken.com/0/public/Ticker?pair=${pairs.join(',')}`;
 
       const response = await fetch(url, {
         method: 'GET',
@@ -51,19 +59,25 @@ export const useLivePrices = (
       });
 
       if (!response.ok) {
-        throw new Error(`CoinGecko API error: ${response.status}`);
+        throw new Error(`Kraken API error: ${response.status}`);
       }
 
       const data = await response.json();
+
+      if (data.error && data.error.length > 0) {
+        throw new Error(data.error[0]);
+      }
 
       // Transform API response to our format
       const newPrices = {};
       const currentTime = Date.now();
 
-      symbols.forEach(symbol => {
-        const internalSymbol = symbolMap[symbol];
-        if (data[symbol] && data[symbol].usd) {
-          newPrices[internalSymbol] = data[symbol].usd;
+      Object.entries(data.result || {}).forEach(([pair, tickerData]) => {
+        const symbol = symbolMap[pair];
+        if (symbol && tickerData && tickerData.a) {
+          // Use ask price (most accurate for bid/ask)
+          const price = parseFloat(tickerData.a[0]);
+          newPrices[symbol] = price;
         }
       });
 
@@ -75,7 +89,7 @@ export const useLivePrices = (
           ...newPrices
         }));
 
-        // Update price history
+        // Update price history and high/low
         setPriceHistory(prevHistory => {
           const newHistory = { ...prevHistory };
 
@@ -88,7 +102,26 @@ export const useLivePrices = (
           return newHistory;
         });
 
-        console.log('✅ CoinGecko prices updated:', newPrices);
+        // Calculate 4-hour high/low
+        setHighLow(prevHighLow => {
+          const newHighLow = { ...prevHighLow };
+
+          Object.entries(newPrices).forEach(([symbol, price]) => {
+            const history = priceHistory[symbol] || [];
+            const allPrices = [...history, price];
+            
+            if (allPrices.length > 0) {
+              newHighLow[symbol] = {
+                high: Math.max(...allPrices),
+                low: Math.min(...allPrices)
+              };
+            }
+          });
+
+          return newHighLow;
+        });
+
+        console.log('✅ Kraken prices updated:', newPrices);
       }
 
       // Clear any previous errors and update status
@@ -98,7 +131,7 @@ export const useLivePrices = (
 
     } catch (err) {
       // Handle API failures gracefully
-      console.error('🚨 CoinGecko API fetch failed:', err.message);
+      console.error('🚨 Kraken API fetch failed:', err.message);
 
       // Set error state but don't clear existing prices
       setError(err.message);
@@ -110,7 +143,7 @@ export const useLivePrices = (
 
       // Don't update lastFetchTime on error to indicate stale data
     }
-  }, [symbols, symbolMap, maxHistoryPoints, isLoading]);
+  }, [symbolMap, maxHistoryPoints, isLoading, priceHistory]);
 
   // Initial fetch on mount
   useEffect(() => {
@@ -127,6 +160,7 @@ export const useLivePrices = (
   return {
     prices,
     priceHistory,
+    highLow,
     isLoading,
     error,
     lastFetchTime,
