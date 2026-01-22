@@ -305,6 +305,7 @@ const useAppState = () => {
   return {
     balance,
     prices,
+    priceHistory,
     selectedMarket,
     setSelectedMarket,
     positions,
@@ -858,6 +859,7 @@ const App = () => {
       </div>
     </AppContext.Provider>
   );
+};
 };
 
 export default App;
