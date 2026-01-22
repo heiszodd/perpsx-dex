@@ -40,10 +40,10 @@ const useAppState = () => {
     }
   );
 
-  // Use CoinGecko API for live prices (polls every 4 seconds, max 50 history points)
+  // Use CoinGecko API for live prices (polls every 2 seconds for better chart sync, max 50 history points)
   const { prices: livePrices, priceHistory: liveHistory, error: priceError } = useLivePrices(
     ['bitcoin', 'ethereum', 'solana'],
-    4000,
+    2000,
     50
   );
   
@@ -889,10 +889,10 @@ const App = () => {
         </div>
 
         {/* Desktop / Landscape Layout */}
-        <div className="hidden lg:block p-8 h-screen overflow-hidden">
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 h-full">
+        <div className="hidden lg:block p-8 h-screen overflow-hidden flex flex-col">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 flex-1 overflow-hidden">
             {/* Left Panel: Chart & Market Info */}
-            <div className="xl:col-span-2 flex flex-col gap-4">
+            <div className="xl:col-span-2 flex flex-col gap-4 overflow-hidden">
               <Header balance={state.balance} positions={state.positions} onReset={state.resetState} />
               
               {/* Market Selector */}
@@ -936,9 +936,9 @@ const App = () => {
             </div>
 
             {/* Right Panel: Trading Controls */}
-            <div className="xl:col-span-1 flex flex-col gap-4 overflow-y-auto">
+            <div className="xl:col-span-1 flex flex-col gap-4 overflow-y-auto pr-2">
               {/* Direction */}
-              <div className="bg-gray-800/50 rounded-2xl p-4">
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
                 <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Position Direction</div>
                 <DirectionSelector
                   direction={state.direction}
@@ -947,7 +947,7 @@ const App = () => {
               </div>
 
               {/* Position Size */}
-              <div className="bg-gray-800/50 rounded-2xl p-4">
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
                 <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Risk Amount</div>
                 <PositionSizeSelector 
                   positionSize={state.positionSize} 
@@ -956,7 +956,7 @@ const App = () => {
               </div>
 
               {/* Risk Mode */}
-              <div className="bg-gray-800/50 rounded-2xl p-4">
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
                 <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Risk Mode</div>
                 <RiskModeSelector 
                   riskMode={state.riskMode} 
@@ -966,14 +966,16 @@ const App = () => {
               </div>
 
               {/* Advanced Toggle */}
-              <AdvancedToggle 
-                showAdvanced={state.showAdvanced}
-                setShowAdvanced={state.setShowAdvanced}
-              />
+              <div className="flex-shrink-0">
+                <AdvancedToggle 
+                  showAdvanced={state.showAdvanced}
+                  setShowAdvanced={state.setShowAdvanced}
+                />
+              </div>
 
               {/* Advanced Settings */}
               {state.showAdvanced && (
-                <div className="bg-gray-800/50 rounded-2xl p-4">
+                <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
                   <AdvancedSettings
                     advancedSettings={state.advancedSettings}
                     setAdvancedSettings={state.setAdvancedSettings}
@@ -987,19 +989,21 @@ const App = () => {
               )}
 
               {/* Action Buttons */}
-              <ActionButtons 
-                openPosition={state.openPosition}
-                selectedMarket={state.selectedMarket}
-                prices={state.prices}
-                direction={state.direction}
-                positionSize={state.positionSize}
-                riskMode={state.riskMode}
-                showAdvanced={state.showAdvanced}
-                advancedSettings={state.advancedSettings}
-              />
+              <div className="flex-shrink-0">
+                <ActionButtons 
+                  openPosition={state.openPosition}
+                  selectedMarket={state.selectedMarket}
+                  prices={state.prices}
+                  direction={state.direction}
+                  positionSize={state.positionSize}
+                  riskMode={state.riskMode}
+                  showAdvanced={state.showAdvanced}
+                  advancedSettings={state.advancedSettings}
+                />
+              </div>
 
               {/* Positions Summary */}
-              <div className="bg-gray-800/50 rounded-2xl p-3 text-xs">
+              <div className="bg-gray-800/50 rounded-2xl p-3 text-xs flex-shrink-0">
                 <div className="text-gray-400 mb-2">Active Positions: {state.positions.length}</div>
                 {state.positions.length > 0 && (
                   <div className="space-y-1">
@@ -1018,7 +1022,7 @@ const App = () => {
           </div>
 
           {/* Bottom Panel: Positions List */}
-          <div className="mt-6 bg-gray-800/30 rounded-2xl p-4 max-h-48 overflow-y-auto">
+          <div className="mt-6 bg-gray-800/30 rounded-2xl p-4 max-h-48 overflow-y-auto flex-shrink-0">
             <h3 className="text-sm font-semibold mb-4 text-gray-300">Open Positions</h3>
             <PositionsList 
               positions={state.positions}

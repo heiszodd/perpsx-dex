@@ -3,13 +3,13 @@ import { useState, useEffect, useCallback } from 'react';
 /**
  * Custom hook for fetching real-time crypto prices from CoinGecko API
  * @param {Array} symbols - Array of crypto symbols (e.g., ['bitcoin', 'ethereum', 'solana'])
- * @param {number} pollInterval - Polling interval in milliseconds (default: 4000ms)
+ * @param {number} pollInterval - Polling interval in milliseconds (default: 2000ms for better sync)
  * @param {number} maxHistoryPoints - Maximum number of historical price points to keep (default: 50)
  * @returns {Object} - { prices, priceHistory, isLoading, error, lastFetchTime }
  */
 export const useLivePrices = (
   symbols = ['bitcoin', 'ethereum', 'solana'],
-  pollInterval = 4000,
+  pollInterval = 2000,
   maxHistoryPoints = 50
 ) => {
   const [prices, setPrices] = useState({

@@ -186,4 +186,4 @@ const AlivePriceChart = ({ prices, direction, entryPrice, currentPrice, pnl }) =
   );
 };
 
-export default AlivePriceChart;
+export default React.memo(AlivePriceChart);
