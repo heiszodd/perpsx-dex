@@ -766,7 +766,8 @@ const App = () => {
   return (
     <AppContext.Provider value={state}>
       <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white">
-        <div className="max-w-md mx-auto p-6 py-8">
+        {/* Mobile / Portrait Layout */}
+        <div className="lg:hidden max-w-md mx-auto p-6 py-8">
           <Header balance={state.balance} positions={state.positions} />
           <MarketSelector 
             selectedMarket={state.selectedMarket}
@@ -827,6 +828,146 @@ const App = () => {
             closePosition={state.closePosition}
             closeAllPositions={state.closeAllPositions}
           />
+        </div>
+
+        {/* Desktop / Landscape Layout */}
+        <div className="hidden lg:block p-8 h-screen overflow-hidden">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 h-full">
+            {/* Left Panel: Chart & Market Info */}
+            <div className="xl:col-span-2 flex flex-col gap-4">
+              <Header balance={state.balance} positions={state.positions} />
+              
+              {/* Market Selector */}
+              <div className="bg-gray-800/50 rounded-2xl p-4">
+                <div className="grid grid-cols-3 gap-2">
+                  {['BTC', 'ETH', 'SOL'].map(market => (
+                    <button
+                      key={market}
+                      onClick={() => state.setSelectedMarket(market)}
+                      className={`py-3 px-3 rounded-xl font-semibold transition-all text-sm ${
+                        state.selectedMarket === market
+                          ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/50'
+                          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                      }`}
+                    >
+                      <div className="text-xs opacity-80">{market}</div>
+                      <div className="text-sm font-bold">
+                        {state.prices[market] ? `$${Number(state.prices[market]).toFixed(0)}` : '...'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Large Chart Area */}
+              <div className="flex-1 bg-gray-800/30 rounded-2xl p-6 flex flex-col items-center justify-center overflow-hidden">
+                <MarketPrice
+                  market={state.selectedMarket}
+                  price={state.prices[state.selectedMarket]}
+                />
+                <div className="w-full h-full flex items-center justify-center">
+                  <AlivePriceChart
+                    prices={state.priceHistory[state.selectedMarket]}
+                    direction={state.direction === 'LONG' ? 'UP' : 'DOWN'}
+                    entryPrice={state.positions.length > 0 ? state.positions[0].entryPrice : null}
+                    currentPrice={state.prices[state.selectedMarket]}
+                    pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Right Panel: Trading Controls */}
+            <div className="xl:col-span-1 flex flex-col gap-4 overflow-y-auto">
+              {/* Direction */}
+              <div className="bg-gray-800/50 rounded-2xl p-4">
+                <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Position Direction</div>
+                <DirectionSelector
+                  direction={state.direction}
+                  setDirection={state.setDirection}
+                />
+              </div>
+
+              {/* Position Size */}
+              <div className="bg-gray-800/50 rounded-2xl p-4">
+                <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Risk Amount</div>
+                <PositionSizeSelector 
+                  positionSize={state.positionSize} 
+                  setPositionSize={state.setPositionSize}
+                />
+              </div>
+
+              {/* Risk Mode */}
+              <div className="bg-gray-800/50 rounded-2xl p-4">
+                <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Risk Mode</div>
+                <RiskModeSelector 
+                  riskMode={state.riskMode} 
+                  setRiskMode={state.setRiskMode}
+                  showAdvanced={state.showAdvanced}
+                />
+              </div>
+
+              {/* Advanced Toggle */}
+              <AdvancedToggle 
+                showAdvanced={state.showAdvanced}
+                setShowAdvanced={state.setShowAdvanced}
+              />
+
+              {/* Advanced Settings */}
+              {state.showAdvanced && (
+                <div className="bg-gray-800/50 rounded-2xl p-4">
+                  <AdvancedSettings
+                    advancedSettings={state.advancedSettings}
+                    setAdvancedSettings={state.setAdvancedSettings}
+                    selectedMarket={state.selectedMarket}
+                    prices={state.prices}
+                    direction={state.direction}
+                    positionSize={state.positionSize}
+                    riskMode={state.riskMode}
+                  />
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <ActionButtons 
+                openPosition={state.openPosition}
+                selectedMarket={state.selectedMarket}
+                prices={state.prices}
+                direction={state.direction}
+                positionSize={state.positionSize}
+                riskMode={state.riskMode}
+                showAdvanced={state.showAdvanced}
+                advancedSettings={state.advancedSettings}
+              />
+
+              {/* Positions Summary */}
+              <div className="bg-gray-800/50 rounded-2xl p-3 text-xs">
+                <div className="text-gray-400 mb-2">Active Positions: {state.positions.length}</div>
+                {state.positions.length > 0 && (
+                  <div className="space-y-1">
+                    {state.positions.slice(0, 3).map(pos => (
+                      <div key={pos.id} className="flex justify-between text-xs text-gray-300">
+                        <span>{pos.direction} {pos.market}</span>
+                        <span className={pos.unrealizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}>
+                          {pos.unrealizedPnL >= 0 ? '+' : ''}${pos.unrealizedPnL.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Panel: Positions List */}
+          <div className="mt-6 bg-gray-800/30 rounded-2xl p-4 max-h-48 overflow-y-auto">
+            <h3 className="text-sm font-semibold mb-4 text-gray-300">Open Positions</h3>
+            <PositionsList 
+              positions={state.positions}
+              closePosition={state.closePosition}
+              closeAllPositions={state.closeAllPositions}
+            />
+          </div>
         </div>
       </div>
     </AppContext.Provider>
