@@ -30,6 +30,7 @@ const useAppState = () => {
   const [positionSize, setPositionSize] = useState(initialState?.positionSize ?? 50);
   const [riskMode, setRiskMode] = useState(initialState?.riskMode ?? 'BALANCED');
   const [showAdvanced, setShowAdvanced] = useState(initialState?.showAdvanced ?? false);
+  const [theme, setTheme] = useState(initialState?.theme ?? 'dark');
   const [advancedSettings, setAdvancedSettings] = useState(
     initialState?.advancedSettings ?? {
       orderType: 'MARKET',
@@ -40,10 +41,10 @@ const useAppState = () => {
     }
   );
 
-  // Use CoinGecko API for live prices (polls every 2 seconds for better chart sync, max 50 history points)
+  // Use CoinGecko API for live prices (polls every 1 second for real-time sync, max 50 history points)
   const { prices: livePrices, priceHistory: liveHistory, error: priceError } = useLivePrices(
     ['bitcoin', 'ethereum', 'solana'],
-    2000,
+    1000,
     50
   );
   
@@ -70,6 +71,10 @@ const useAppState = () => {
     DEGENERATE: 10
   };
 
+  // Calculate total margin used by open positions
+  const totalMarginUsed = positions.reduce((sum, pos) => sum + pos.initialMargin, 0);
+  const availableMargin = balance - totalMarginUsed;
+
   // Auto-save state to localStorage
   useEffect(() => {
     const stateToSave = {
@@ -80,6 +85,7 @@ const useAppState = () => {
       positionSize,
       riskMode,
       showAdvanced,
+      theme,
       advancedSettings,
       lastSaved: new Date().toISOString()
     };
@@ -89,7 +95,7 @@ const useAppState = () => {
     } catch (error) {
       console.warn('⚠️ Failed to save state to cache:', error);
     }
-  }, [balance, selectedMarket, positions, direction, positionSize, riskMode, showAdvanced, advancedSettings]);
+  }, [balance, selectedMarket, positions, direction, positionSize, riskMode, showAdvanced, theme, advancedSettings]);
   useEffect(() => {
     if (priceError) {
       console.warn('⚠️ CoinGecko API error - using demo prices:', priceError);
@@ -113,7 +119,7 @@ const useAppState = () => {
           SOL: [...prevHistory.SOL, fallbackPrices.SOL].slice(-50)
         }));
       }
-    }, 2000);
+    }, 1000);
 
     return () => clearInterval(interval);
   }, [livePrices.BTC, livePrices.ETH, livePrices.SOL, fallbackPrices]);
@@ -173,11 +179,11 @@ const useAppState = () => {
         if (closedPositions.length > 0) {
           const totalReturn = closedPositions.reduce((sum, p) => {
             if (p.liquidated) {
-              // For liquidation: return margin + negative PnL (which is -positionSize)
-              return sum + p.initialMargin + p.unrealizedPnL;
+              // For liquidation: only add PnL (negative)
+              return sum + p.unrealizedPnL;
             }
-            // For TP/SL: return margin + PnL
-            return sum + p.initialMargin + p.unrealizedPnL;
+            // For TP/SL: only add PnL (margin not deducted)
+            return sum + p.unrealizedPnL;
           }, 0);
           setBalance(b => b + totalReturn);
 
@@ -245,8 +251,7 @@ const useAppState = () => {
         stopLoss: advancedSettings.stopLoss ? parseFloat(advancedSettings.stopLoss) : null
       };
 
-      // Atomic state update: deduct margin and add position
-      setBalance(prev => prev - margin);
+      // Atomic state update: add position (margin not deducted - only unrealized gains count)
       setPositions(prev => [...prev, newPosition]);
       console.log(`✅ Opened ${direction} position: ${notionalSize} at ${leverage}x leverage. Risk: $${riskAmount.toFixed(2)}`);
       return;
@@ -280,8 +285,7 @@ const useAppState = () => {
       stopLoss: advancedSettings.stopLoss ? parseFloat(advancedSettings.stopLoss) : null
     };
 
-    // Atomic state update: deduct margin and add position
-    setBalance(prev => prev - margin);
+    // Atomic state update: add position (margin not deducted - only unrealized gains count)
     setPositions(prev => [...prev, newPosition]);
     console.log(`✅ Opened ${direction} position: ${notionalSize} at ${leverage}x leverage. Risk: $${riskAmount.toFixed(2)}`);
   };
@@ -291,10 +295,9 @@ const useAppState = () => {
     if (!position) return;
 
     const pnl = position.unrealizedPnL;
-    const margin = position.initialMargin;
 
-    // Atomic state update: return margin + PnL and remove position
-    setBalance(prev => prev + margin + pnl);
+    // Atomic state update: add PnL only (margin was never deducted) and remove position
+    setBalance(prev => prev + pnl);
     setPositions(prev => prev.filter(p => p.id !== positionId));
 
     console.log(`✅ Closed ${position.direction} position: ${position.size} at ${position.leverage}x leverage. Margin returned: $${margin.toFixed(2)}, PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`);
@@ -302,10 +305,9 @@ const useAppState = () => {
 
   const closeAllPositions = () => {
     const totalPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
-    const totalMargin = positions.reduce((sum, pos) => sum + pos.initialMargin, 0);
 
-    // Atomic state update: return all margin + total PnL and clear positions
-    setBalance(prev => prev + totalMargin + totalPnL);
+    // Atomic state update: add total PnL only (margin was never deducted) and clear positions
+    setBalance(prev => prev + totalPnL);
     setPositions([]);
 
     console.log(`✅ Closed all positions. Total margin returned: $${totalMargin.toFixed(2)}, Total PnL: ${totalPnL >= 0 ? '+' : ''}$${totalPnL.toFixed(2)}`);
@@ -340,6 +342,8 @@ const useAppState = () => {
     setRiskMode,
     showAdvanced,
     setShowAdvanced,
+    theme,
+    setTheme,
     advancedSettings,
     setAdvancedSettings,
     openPosition,
@@ -350,7 +354,7 @@ const useAppState = () => {
 };
 
 // Components
-const Header = ({ balance, positions, onReset }) => {
+const Header = ({ balance, positions, onReset, theme, onThemeChange, totalMarginUsed }) => {
   const totalUnrealizedPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
   const liveBalance = balance + totalUnrealizedPnL;
   const balanceColor = totalUnrealizedPnL >= 0 ? 'text-green-500' : 'text-red-500';
@@ -358,26 +362,35 @@ const Header = ({ balance, positions, onReset }) => {
   return (
     <div className="flex justify-between items-center mb-8">
       <div>
-        <h1 className="text-2xl font-bold text-white">PerpsX</h1>
-        <span className="text-xs text-gray-500 uppercase tracking-wider">Demo Mode</span>
+        <h1 className="text-2xl font-bold">PerpsX</h1>
+        <span className="text-xs uppercase tracking-wider opacity-60">Demo Mode</span>
       </div>
       <div className="text-right">
-        <div className="text-xs text-gray-500 mb-1">Demo Balance</div>
-        <div className={`text-2xl font-bold transition-colors ${positions.length > 0 ? balanceColor : 'text-white'}`}>
+        <div className="text-xs opacity-60 mb-1">Demo Balance</div>
+        <div className={`text-2xl font-bold transition-colors ${positions.length > 0 ? balanceColor : ''}`}>
           ${liveBalance.toFixed(2)}
         </div>
         {positions.length > 0 && (
-          <div className="text-xs text-gray-500 mt-1">
-            Base: ${balance.toFixed(2)}
+          <div className="text-xs opacity-60 mt-1">
+            Margin: ${totalMarginUsed.toFixed(2)} / ${balance.toFixed(2)}
           </div>
         )}
-        <button
-          onClick={onReset}
-          className="text-xs text-gray-400 hover:text-gray-300 mt-2 transition-colors"
-          title="Clear all data and reset to defaults"
-        >
-          Reset
-        </button>
+        <div className="flex gap-2 mt-2 justify-end">
+          <button
+            onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
+            className="text-xs px-2 py-1 rounded opacity-70 hover:opacity-100 transition-opacity"
+            title="Toggle theme"
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+          <button
+            onClick={onReset}
+            className="text-xs opacity-70 hover:opacity-100 transition-opacity"
+            title="Clear all data and reset to defaults"
+          >
+            Reset
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -461,7 +474,7 @@ const PositionSizeSelector = ({ positionSize, setPositionSize }) => {
   
   return (
     <div className="mb-6">
-      <div className="text-sm text-gray-500 mb-3">Position Size</div>
+      <div className="text-sm text-gray-500 mb-3">Risk Amount</div>
       <div className="grid grid-cols-3 gap-3">
         {sizes.map(size => (
           <button
@@ -609,18 +622,23 @@ const AdvancedSettings = ({ advancedSettings, setAdvancedSettings, selectedMarke
           />
         </div>
       )}
-      {/* Custom Leverage */}
+      {/* Custom Leverage Slider */}
       <div>
-        <div className="text-sm text-gray-400 mb-2 font-medium">Custom Leverage (1-100x)</div>
-        <input
-          type="number"
-          value={advancedSettings.customLeverage}
-          onChange={(e) => setAdvancedSettings(prev => ({ ...prev, customLeverage: e.target.value }))}
-          placeholder="e.g., 5"
-          min="1"
-          max="100"
-          className="w-full py-3 px-4 rounded-2xl bg-gray-800 text-white placeholder-gray-500 border border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:outline-none transition-all duration-200"
-        />
+        <div className="text-sm text-gray-400 mb-3 font-medium">Custom Leverage</div>
+        <div className="flex items-center gap-4">
+          <input
+            type="range"
+            min="1"
+            max="200"
+            value={advancedSettings.customLeverage || leverageMap[riskMode] || 5}
+            onChange={(e) => setAdvancedSettings(prev => ({ ...prev, customLeverage: e.target.value }))}
+            className="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+          />
+          <div className="text-xl font-bold text-blue-400 min-w-max">
+            {advancedSettings.customLeverage ? `${Math.round(advancedSettings.customLeverage)}x` : `${leverageMap[riskMode]}x`}
+          </div>
+        </div>
+        <div className="text-xs text-gray-500 mt-2">Range: 1x - 200x</div>
       </div>
 
       {/* Take Profit */}
@@ -634,8 +652,8 @@ const AdvancedSettings = ({ advancedSettings, setAdvancedSettings, selectedMarke
           className="w-full py-3 px-4 rounded-2xl bg-gray-800 text-white placeholder-gray-500 border border-gray-700 focus:border-green-500 focus:ring-2 focus:ring-green-500/30 focus:outline-none transition-all duration-200"
         />
         {tpPnL !== null && (
-          <div className="text-xs text-green-400 mt-3 font-bold animate-pulse-soft">
-            PnL at TP: +${tpPnL.toFixed(2)}
+          <div className={`text-xs mt-3 font-bold animate-pulse-soft ${tpPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            PnL at TP: {tpPnL >= 0 ? '+' : ''}${tpPnL.toFixed(2)}
           </div>
         )}
       </div>
@@ -651,8 +669,8 @@ const AdvancedSettings = ({ advancedSettings, setAdvancedSettings, selectedMarke
           className="w-full py-3 px-4 rounded-2xl bg-gray-800 text-white placeholder-gray-500 border border-gray-700 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 focus:outline-none transition-all duration-200"
         />
         {slPnL !== null && (
-          <div className="text-xs text-red-400 mt-3 font-bold animate-pulse-soft">
-            PnL at SL: ${slPnL.toFixed(2)}
+          <div className={`text-xs mt-3 font-bold animate-pulse-soft ${slPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            PnL at SL: {slPnL >= 0 ? '+' : ''}${slPnL.toFixed(2)}
           </div>
         )}
       </div>
@@ -830,13 +848,29 @@ const PositionsList = ({ positions, closePosition, closeAllPositions }) => {
 
 const App = () => {
   const state = useAppState();
+  
+  // Apply theme to document
+  useEffect(() => {
+    const isDark = state.theme === 'dark';
+    if (isDark) {
+      document.documentElement.classList.remove('light');
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.classList.add('light');
+    }
+  }, [state.theme]);
 
   return (
     <AppContext.Provider value={state}>
-      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white">
+      <div className={`min-h-screen transition-colors duration-300 ${
+        state.theme === 'dark'
+          ? 'bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white'
+          : 'bg-gradient-to-br from-gray-50 via-white to-gray-100 text-gray-900'
+      }`}>
         {/* Mobile / Portrait Layout */}
         <div className="lg:hidden max-w-md mx-auto p-6 py-8">
-          <Header balance={state.balance} positions={state.positions} onReset={state.resetState} />
+          <Header balance={state.balance} positions={state.positions} onReset={state.resetState} theme={state.theme} onThemeChange={state.setTheme} totalMarginUsed={totalMarginUsed} />
           <MarketSelector 
             selectedMarket={state.selectedMarket}
             setSelectedMarket={state.setSelectedMarket}
@@ -900,11 +934,15 @@ const App = () => {
         </div>
 
         {/* Desktop / Landscape Layout */}
-        <div className="hidden lg:block w-full h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white overflow-hidden">
+        <div className={`hidden lg:block w-full h-screen overflow-hidden transition-colors duration-300 ${
+          state.theme === 'dark'
+            ? 'bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white'
+            : 'bg-gradient-to-br from-gray-50 via-white to-gray-100 text-gray-900'
+        }`}>
           <div className="flex h-full gap-6 p-8 overflow-hidden">
             {/* Left Panel: Chart & Market Info (flex-1) */}
             <div className="flex-1 flex flex-col gap-4 min-w-0 min-h-0 overflow-hidden">
-              <Header balance={state.balance} positions={state.positions} onReset={state.resetState} />
+              <Header balance={state.balance} positions={state.positions} onReset={state.resetState} theme={state.theme} onThemeChange={state.setTheme} totalMarginUsed={totalMarginUsed} />
               
               {/* Market Selector */}
               <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
@@ -960,7 +998,7 @@ const App = () => {
                 />
               </div>
 
-              {/* Position Size */}
+              {/* Risk Amount */}
               <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
                 <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Risk Amount</div>
                 <PositionSizeSelector 
