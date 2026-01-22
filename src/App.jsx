@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useTradingEngine } from './hooks/useTradingEngine';
 import { useLivePrices } from './hooks/useLivePrices';
-import AlivePriceChart from './components/AlivePriceChart';
 
 // Theme-aware utility
 const getThemeClasses = (theme) => ({
@@ -908,14 +907,6 @@ const App = () => {
             price={state.prices[state.selectedMarket]}
             isLive={!!(state.livePrices.BTC && state.livePrices.ETH && state.livePrices.SOL)}
           />
-          <AlivePriceChart
-            prices={state.priceHistory[state.selectedMarket]}
-            direction={state.direction === 'LONG' ? 'UP' : 'DOWN'}
-            entryPrice={state.positions.length > 0 ? state.positions[0].entryPrice : null}
-            currentPrice={state.prices[state.selectedMarket]}
-            pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
-            highLow={state.liveHighLow[state.selectedMarket]}
-          />
           <DirectionSelector
             direction={state.direction}
             setDirection={state.setDirection}
@@ -994,25 +985,13 @@ const App = () => {
                 </div>
               </div>
 
-              {/* Large Chart Area - takes remaining space */}
-              <div className="flex-1 bg-gray-800/30 rounded-2xl p-6 flex flex-col items-center justify-center overflow-hidden min-h-0">
-                <div className="flex-shrink-0">
-                  <MarketPrice
-                    market={state.selectedMarket}
-                    price={state.prices[state.selectedMarket]}
-                    isLive={!!(state.livePrices.BTC && state.livePrices.ETH && state.livePrices.SOL)}
-                  />
-                </div>
-                <div className="flex-1 w-full min-h-0">
-                  <AlivePriceChart
-                    prices={state.priceHistory[state.selectedMarket]}
-                    direction={state.direction === 'LONG' ? 'UP' : 'DOWN'}
-                    entryPrice={state.positions.length > 0 ? state.positions[0].entryPrice : null}
-                    currentPrice={state.prices[state.selectedMarket]}
-                    pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
-                    highLow={state.liveHighLow[state.selectedMarket]}
-                  />
-                </div>
+              {/* Market Price Display */}
+              <div className="bg-gray-800/30 rounded-2xl p-6 flex-shrink-0">
+                <MarketPrice
+                  market={state.selectedMarket}
+                  price={state.prices[state.selectedMarket]}
+                  isLive={!!(state.livePrices.BTC && state.livePrices.ETH && state.livePrices.SOL)}
+                />
               </div>
             </div>
 
