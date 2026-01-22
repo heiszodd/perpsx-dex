@@ -889,14 +889,14 @@ const App = () => {
         </div>
 
         {/* Desktop / Landscape Layout */}
-        <div className="hidden lg:block p-8 h-screen overflow-hidden flex flex-col">
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 flex-1 overflow-hidden">
-            {/* Left Panel: Chart & Market Info */}
-            <div className="xl:col-span-2 flex flex-col gap-4 overflow-hidden">
+        <div className="hidden lg:block w-full h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white overflow-hidden">
+          <div className="flex h-full gap-6 p-8">
+            {/* Left Panel: Chart & Market Info (2/3 width) */}
+            <div className="flex-1 flex flex-col gap-4 min-w-0 overflow-hidden">
               <Header balance={state.balance} positions={state.positions} onReset={state.resetState} />
               
               {/* Market Selector */}
-              <div className="bg-gray-800/50 rounded-2xl p-4">
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
                 <div className="grid grid-cols-3 gap-2">
                   {['BTC', 'ETH', 'SOL'].map(market => (
                     <button
@@ -918,7 +918,7 @@ const App = () => {
               </div>
 
               {/* Large Chart Area */}
-              <div className="flex-1 bg-gray-800/30 rounded-2xl p-6 flex flex-col items-center justify-center overflow-hidden">
+              <div className="flex-1 bg-gray-800/30 rounded-2xl p-6 flex flex-col items-center justify-center overflow-hidden min-h-0">
                 <MarketPrice
                   market={state.selectedMarket}
                   price={state.prices[state.selectedMarket]}
@@ -935,8 +935,8 @@ const App = () => {
               </div>
             </div>
 
-            {/* Right Panel: Trading Controls */}
-            <div className="xl:col-span-1 flex flex-col gap-4 overflow-y-auto pr-2">
+            {/* Right Panel: Trading Controls (1/3 width) */}
+            <div className="w-96 flex flex-col gap-4 overflow-y-auto pr-2">
               {/* Direction */}
               <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
                 <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Position Direction</div>
@@ -1018,17 +1018,17 @@ const App = () => {
                   </div>
                 )}
               </div>
-            </div>
-          </div>
 
-          {/* Bottom Panel: Positions List */}
-          <div className="mt-6 bg-gray-800/30 rounded-2xl p-4 max-h-48 overflow-y-auto flex-shrink-0">
-            <h3 className="text-sm font-semibold mb-4 text-gray-300">Open Positions</h3>
-            <PositionsList 
-              positions={state.positions}
-              closePosition={state.closePosition}
-              closeAllPositions={state.closeAllPositions}
-            />
+              {/* Positions List */}
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0 max-h-64 overflow-y-auto">
+                <h3 className="text-sm font-semibold mb-4 text-gray-300">Open Positions</h3>
+                <PositionsList 
+                  positions={state.positions}
+                  closePosition={state.closePosition}
+                  closeAllPositions={state.closeAllPositions}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
