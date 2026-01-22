@@ -1,28 +1,67 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useTradingEngine } from './hooks/useTradingEngine';
+import { useLivePrices } from './hooks/useLivePrices';
+import AlivePriceChart from './components/AlivePriceChart';
 
 // Context for global state
 const AppContext = createContext();
 
 const useAppState = () => {
-  const [balance, setBalance] = useState(1000);
-  const [prices, setPrices] = useState({
-    BTC: null,
-    ETH: null,
-    SOL: null
+  // Initialize from localStorage or use defaults
+  const getInitialState = () => {
+    try {
+      const saved = localStorage.getItem('perpsx_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        console.log('✅ Loaded trading state from cache');
+        return parsed;
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to load cached state:', error);
+    }
+    return null;
+  };
+
+  const initialState = getInitialState();
+  const [balance, setBalance] = useState(initialState?.balance ?? 1000);
+  const [selectedMarket, setSelectedMarket] = useState(initialState?.selectedMarket ?? 'BTC');
+  const [positions, setPositions] = useState(initialState?.positions ?? []);
+  const [direction, setDirection] = useState(initialState?.direction ?? 'LONG');
+  const [positionSize, setPositionSize] = useState(initialState?.positionSize ?? 50);
+  const [riskMode, setRiskMode] = useState(initialState?.riskMode ?? 'BALANCED');
+  const [showAdvanced, setShowAdvanced] = useState(initialState?.showAdvanced ?? false);
+  const [advancedSettings, setAdvancedSettings] = useState(
+    initialState?.advancedSettings ?? {
+      orderType: 'MARKET',
+      limitPrice: '',
+      customLeverage: '',
+      takeProfit: '',
+      stopLoss: ''
+    }
+  );
+
+  // Use CoinGecko API for live prices (polls every 2 seconds for better chart sync, max 50 history points)
+  const { prices: livePrices, priceHistory: liveHistory, error: priceError } = useLivePrices(
+    ['bitcoin', 'ethereum', 'solana'],
+    2000,
+    50
+  );
+  
+  // Fallback to local state if API fails
+  const [fallbackPrices, setFallbackPrices] = useState({
+    BTC: 95000,
+    ETH: 3500,
+    SOL: 140
   });
-  const [selectedMarket, setSelectedMarket] = useState('BTC');
-  const [positions, setPositions] = useState([]);
-  const [direction, setDirection] = useState('LONG');
-  const [positionSize, setPositionSize] = useState(50);
-  const [riskMode, setRiskMode] = useState('BALANCED');
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [advancedSettings, setAdvancedSettings] = useState({
-    orderType: 'MARKET', // MARKET or LIMIT
-    limitPrice: '',
-    customLeverage: '',
-    takeProfit: '',
-    stopLoss: ''
+  const [fallbackHistory, setFallbackHistory] = useState({
+    BTC: [95000],
+    ETH: [3500],
+    SOL: [140]
   });
+  
+  // Use live prices if available, fallback otherwise
+  const prices = (livePrices.BTC && livePrices.ETH && livePrices.SOL) ? livePrices : fallbackPrices;
+  const priceHistory = (liveHistory.BTC && liveHistory.BTC.length > 0) ? liveHistory : fallbackHistory;
 
   // Map risk modes to leverage
   const leverageMap = {
@@ -31,138 +70,174 @@ const useAppState = () => {
     DEGENERATE: 10
   };
 
-  // Fetch initial prices and add random movements
+  // Auto-save state to localStorage
   useEffect(() => {
-    const fetchInitialPrices = async () => {
-      try {
-        const btcRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
-        const ethRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT');
-        const solRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT');
-        
-        const btcData = await btcRes.json();
-        const ethData = await ethRes.json();
-        const solData = await solRes.json();
-        
-        setPrices({
-          BTC: parseFloat(btcData.price),
-          ETH: parseFloat(ethData.price),
-          SOL: parseFloat(solData.price)
-        });
-      } catch (error) {
-        console.error('Failed to fetch prices:', error);
-        setPrices({
-          BTC: 95000,
-          ETH: 3500,
-          SOL: 140
-        });
-      }
+    const stateToSave = {
+      balance,
+      selectedMarket,
+      positions,
+      direction,
+      positionSize,
+      riskMode,
+      showAdvanced,
+      advancedSettings,
+      lastSaved: new Date().toISOString()
     };
-
-    fetchInitialPrices();
-  }, []);
-
-  // Add random price movements
+    
+    try {
+      localStorage.setItem('perpsx_state', JSON.stringify(stateToSave));
+    } catch (error) {
+      console.warn('⚠️ Failed to save state to cache:', error);
+    }
+  }, [balance, selectedMarket, positions, direction, positionSize, riskMode, showAdvanced, advancedSettings]);
+  useEffect(() => {
+    if (priceError) {
+      console.warn('⚠️ CoinGecko API error - using demo prices:', priceError);
+    }
+  }, [priceError]);
+  
+  // Add slight random jitter to fallback prices for demo mode
   useEffect(() => {
     const interval = setInterval(() => {
-      setPrices(prev => {
-        if (!prev.BTC) return prev;
+      if (!livePrices.BTC || !livePrices.ETH || !livePrices.SOL) {
+        // Only add jitter if using fallback prices (live prices already updating via API)
+        setFallbackPrices(prev => ({
+          BTC: prev.BTC * (1 + (Math.random() - 0.5) * 0.0005),
+          ETH: prev.ETH * (1 + (Math.random() - 0.5) * 0.0005),
+          SOL: prev.SOL * (1 + (Math.random() - 0.5) * 0.0005)
+        }));
         
-        return {
-          BTC: prev.BTC * (1 + (Math.random() - 0.5) * 0.002), // ±0.2% movement
-          ETH: prev.ETH * (1 + (Math.random() - 0.5) * 0.003), // ±0.3% movement
-          SOL: prev.SOL * (1 + (Math.random() - 0.5) * 0.004)  // ±0.4% movement
-        };
-      });
+        setFallbackHistory(prevHistory => ({
+          BTC: [...prevHistory.BTC, fallbackPrices.BTC].slice(-50),
+          ETH: [...prevHistory.ETH, fallbackPrices.ETH].slice(-50),
+          SOL: [...prevHistory.SOL, fallbackPrices.SOL].slice(-50)
+        }));
+      }
     }, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [livePrices.BTC, livePrices.ETH, livePrices.SOL, fallbackPrices]);
 
   // Update unrealized PnL for all positions
   useEffect(() => {
     if (positions.length > 0 && prices.BTC) {
-      setPositions(prevPositions => 
-        prevPositions.map(pos => {
+      setPositions(prevPositions => {
+        const closedPositions = [];
+
+        // In one pass: update PnL, detect closures, collect closed positions
+        const updatedPositions = prevPositions.map(pos => {
           const currentPrice = prices[pos.market];
           const priceDiff = currentPrice - pos.entryPrice;
           const multiplier = pos.direction === 'LONG' ? 1 : -1;
-          const leverage = pos.leverage;
-          const pnl = (priceDiff / pos.entryPrice) * pos.size * leverage * multiplier;
-          
+          // pos.size is now notional size (riskAmount * leverage), so no need to multiply by leverage again
+          const pnl = (priceDiff / pos.entryPrice) * pos.size * multiplier;
+
           // Check take profit
           if (pos.takeProfit) {
-            const tpHit = pos.direction === 'LONG' 
-              ? currentPrice >= pos.takeProfit 
+            const tpHit = pos.direction === 'LONG'
+              ? currentPrice >= pos.takeProfit
               : currentPrice <= pos.takeProfit;
             if (tpHit) {
-              return { ...pos, unrealizedPnL: pnl, closedByTP: true };
+              const closedPos = { ...pos, unrealizedPnL: pnl, closedByTP: true };
+              closedPositions.push(closedPos);
+              return closedPos;
             }
           }
 
           // Check stop loss
           if (pos.stopLoss) {
-            const slHit = pos.direction === 'LONG' 
-              ? currentPrice <= pos.stopLoss 
+            const slHit = pos.direction === 'LONG'
+              ? currentPrice <= pos.stopLoss
               : currentPrice >= pos.stopLoss;
             if (slHit) {
-              return { ...pos, unrealizedPnL: pnl, closedBySL: true };
+              const closedPos = { ...pos, unrealizedPnL: pnl, closedBySL: true };
+              closedPositions.push(closedPos);
+              return closedPos;
             }
           }
-          
-          // Check liquidation
-          const liquidationThreshold = pos.size / leverage;
-          if (Math.abs(pnl) >= liquidationThreshold) {
-            return { ...pos, unrealizedPnL: -pos.size, liquidated: true };
-          }
-          
-          return { ...pos, unrealizedPnL: pnl };
-        })
-      );
 
-      // Remove closed positions (TP, SL, liquidation)
-      setPositions(prev => {
-        const closedPositions = prev.filter(p => p.liquidated || p.closedByTP || p.closedBySL);
+          // Check liquidation: loss equals exactly the risk amount at liquidation
+          // unrealizedPnL = (priceDiff / entryPrice) * notionalSize * multiplier
+          // At liquidation: unrealizedPnL = -riskAmount (since notionalSize = riskAmount * leverage)
+          const riskAmount = pos.riskAmount || pos.initialMargin;
+          if (pnl <= -riskAmount) {
+            const closedPos = { ...pos, unrealizedPnL: -riskAmount, liquidated: true };
+            closedPositions.push(closedPos);
+            return closedPos;
+          }
+
+          return { ...pos, unrealizedPnL: pnl };
+        });
+
+        // Externally compute balance adjustments from closed positions
         if (closedPositions.length > 0) {
-          const totalPnL = closedPositions.reduce((sum, p) => {
-            if (p.liquidated) return sum - p.size;
-            return sum + p.unrealizedPnL;
+          const totalReturn = closedPositions.reduce((sum, p) => {
+            if (p.liquidated) {
+              // For liquidation: return margin + negative PnL (which is -positionSize)
+              return sum + p.initialMargin + p.unrealizedPnL;
+            }
+            // For TP/SL: return margin + PnL
+            return sum + p.initialMargin + p.unrealizedPnL;
           }, 0);
-          setBalance(b => b + totalPnL);
-          return prev.filter(p => !p.liquidated && !p.closedByTP && !p.closedBySL);
+          setBalance(b => b + totalReturn);
+
+          // Log liquidation events
+          closedPositions.forEach(p => {
+            if (p.liquidated) {
+              console.log(`💥 Position liquidated! ${p.direction} ${p.size} at ${p.leverage}x leverage. Loss: $${p.unrealizedPnL.toFixed(2)}`);
+            }
+          });
         }
-        return prev;
+
+        // Return only open positions (filter out closed ones)
+        return updatedPositions.filter(pos => !pos.liquidated && !pos.closedByTP && !pos.closedBySL);
       });
     }
-  }, [prices, positions.length]);
+  }, [prices]);
 
   const openPosition = () => {
     const currentPrice = prices[selectedMarket];
     if (!currentPrice) return;
 
     // Use custom leverage if advanced mode is on, otherwise use risk mode
-    const leverage = showAdvanced && advancedSettings.customLeverage 
+    const leverage = showAdvanced && advancedSettings.customLeverage
       ? parseFloat(advancedSettings.customLeverage)
       : leverageMap[riskMode];
+
+    const initialMargin = positionSize / leverage;
+
+    // Check if balance is sufficient
+    if (balance < initialMargin) {
+      console.log(`❌ Insufficient balance. Required: $${initialMargin.toFixed(2)}, Available: $${balance.toFixed(2)}`);
+      return;
+    }
 
     // For limit orders, check if price needs to be triggered
     if (advancedSettings.orderType === 'LIMIT' && advancedSettings.limitPrice) {
       const limitPrice = parseFloat(advancedSettings.limitPrice);
       // In real app, this would be queued. For demo, we'll just use limit as entry
       const entryPrice = limitPrice;
-      
-      const liquidationDistance = positionSize / leverage / positionSize;
-      const liquidationPrice = direction === 'LONG' 
-        ? entryPrice * (1 - liquidationDistance)
-        : entryPrice * (1 + liquidationDistance);
+
+      const riskAmount = positionSize; // positionSize now represents risk amount
+      const notionalSize = riskAmount * leverage;
+      const margin = riskAmount; // margin equals risk amount
+      const maintenanceMargin = 0; // no maintenance margin, liquidation at full loss
+      const liquidationPrice = direction === 'LONG'
+        ? entryPrice * (1 - 1/leverage) // lose full margin at liquidation
+        : entryPrice * (1 + 1/leverage);
 
       const newPosition = {
         id: Date.now(),
         market: selectedMarket,
         entryPrice: entryPrice,
         direction,
-        size: positionSize,
+        size: notionalSize, // display notional size
+        riskAmount, // store risk amount separately
         riskMode: showAdvanced ? 'CUSTOM' : riskMode,
         leverage,
+        initialMargin: margin,
+        maintenanceMargin,
+        marginUsed: margin,
         liquidationPrice,
         unrealizedPnL: 0,
         openedAt: new Date().toLocaleTimeString(),
@@ -170,24 +245,34 @@ const useAppState = () => {
         stopLoss: advancedSettings.stopLoss ? parseFloat(advancedSettings.stopLoss) : null
       };
 
+      // Atomic state update: deduct margin and add position
+      setBalance(prev => prev - margin);
       setPositions(prev => [...prev, newPosition]);
+      console.log(`✅ Opened ${direction} position: ${notionalSize} at ${leverage}x leverage. Risk: $${riskAmount.toFixed(2)}`);
       return;
     }
 
     // Market order
-    const liquidationDistance = positionSize / leverage / positionSize;
-    const liquidationPrice = direction === 'LONG' 
-      ? currentPrice * (1 - liquidationDistance)
-      : currentPrice * (1 + liquidationDistance);
+    const riskAmount = positionSize; // positionSize now represents risk amount
+    const notionalSize = riskAmount * leverage;
+    const margin = riskAmount; // margin equals risk amount
+    const maintenanceMargin = 0; // no maintenance margin, liquidation at full loss
+    const liquidationPrice = direction === 'LONG'
+      ? currentPrice * (1 - 1/leverage) // lose full margin at liquidation
+      : currentPrice * (1 + 1/leverage);
 
     const newPosition = {
       id: Date.now(),
       market: selectedMarket,
       entryPrice: currentPrice,
       direction,
-      size: positionSize,
+      size: notionalSize, // display notional size
+      riskAmount, // store risk amount separately
       riskMode: showAdvanced ? 'CUSTOM' : riskMode,
       leverage,
+      initialMargin: margin,
+      maintenanceMargin,
+      marginUsed: margin,
       liquidationPrice,
       unrealizedPnL: 0,
       openedAt: new Date().toLocaleTimeString(),
@@ -195,7 +280,10 @@ const useAppState = () => {
       stopLoss: advancedSettings.stopLoss ? parseFloat(advancedSettings.stopLoss) : null
     };
 
+    // Atomic state update: deduct margin and add position
+    setBalance(prev => prev - margin);
     setPositions(prev => [...prev, newPosition]);
+    console.log(`✅ Opened ${direction} position: ${notionalSize} at ${leverage}x leverage. Risk: $${riskAmount.toFixed(2)}`);
   };
 
   const closePosition = (positionId) => {
@@ -203,19 +291,43 @@ const useAppState = () => {
     if (!position) return;
 
     const pnl = position.unrealizedPnL;
-    setBalance(prev => prev + pnl);
+    const margin = position.initialMargin;
+
+    // Atomic state update: return margin + PnL and remove position
+    setBalance(prev => prev + margin + pnl);
     setPositions(prev => prev.filter(p => p.id !== positionId));
+
+    console.log(`✅ Closed ${position.direction} position: ${position.size} at ${position.leverage}x leverage. Margin returned: $${margin.toFixed(2)}, PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`);
   };
 
   const closeAllPositions = () => {
     const totalPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
-    setBalance(prev => prev + totalPnL);
+    const totalMargin = positions.reduce((sum, pos) => sum + pos.initialMargin, 0);
+
+    // Atomic state update: return all margin + total PnL and clear positions
+    setBalance(prev => prev + totalMargin + totalPnL);
     setPositions([]);
+
+    console.log(`✅ Closed all positions. Total margin returned: $${totalMargin.toFixed(2)}, Total PnL: ${totalPnL >= 0 ? '+' : ''}$${totalPnL.toFixed(2)}`);
+  };
+
+  const resetState = () => {
+    if (window.confirm('🔄 Clear all data and reset to defaults? This cannot be undone.')) {
+      try {
+        localStorage.removeItem('perpsx_state');
+        console.log('✅ Cache cleared');
+        // Reload page to reset all state
+        window.location.reload();
+      } catch (error) {
+        console.error('Failed to clear cache:', error);
+      }
+    }
   };
 
   return {
     balance,
     prices,
+    priceHistory,
     selectedMarket,
     setSelectedMarket,
     positions,
@@ -231,12 +343,13 @@ const useAppState = () => {
     setAdvancedSettings,
     openPosition,
     closePosition,
-    closeAllPositions
+    closeAllPositions,
+    resetState
   };
 };
 
 // Components
-const Header = ({ balance, positions }) => {
+const Header = ({ balance, positions, onReset }) => {
   const totalUnrealizedPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
   const liveBalance = balance + totalUnrealizedPnL;
   const balanceColor = totalUnrealizedPnL >= 0 ? 'text-green-500' : 'text-red-500';
@@ -257,6 +370,13 @@ const Header = ({ balance, positions }) => {
             Base: ${balance.toFixed(2)}
           </div>
         )}
+        <button
+          onClick={onReset}
+          className="text-xs text-gray-400 hover:text-gray-300 mt-2 transition-colors"
+          title="Clear all data and reset to defaults"
+        >
+          Reset
+        </button>
       </div>
     </div>
   );
@@ -420,16 +540,18 @@ const AdvancedSettings = ({ advancedSettings, setAdvancedSettings, selectedMarke
     const tp = parseFloat(advancedSettings.takeProfit);
     const priceDiff = tp - entryPrice;
     const multiplier = direction === 'LONG' ? 1 : -1;
-    return (priceDiff / entryPrice) * positionSize * leverage * multiplier;
+    const notionalSize = positionSize * leverage; // positionSize is now riskAmount
+    return (priceDiff / entryPrice) * notionalSize * multiplier;
   };
-  
+
   // Calculate PnL at Stop Loss price
   const calculateSLPnL = () => {
     if (!advancedSettings.stopLoss || !entryPrice) return null;
     const sl = parseFloat(advancedSettings.stopLoss);
     const priceDiff = sl - entryPrice;
     const multiplier = direction === 'LONG' ? 1 : -1;
-    return (priceDiff / entryPrice) * positionSize * leverage * multiplier;
+    const notionalSize = positionSize * leverage; // positionSize is now riskAmount
+    return (priceDiff / entryPrice) * notionalSize * multiplier;
   };
   
   const tpPnL = calculateTPPnL();
@@ -544,10 +666,9 @@ const ActionButtons = ({ openPosition, selectedMarket, prices, direction, positi
     ? parseFloat(advancedSettings.limitPrice)
     : currentPrice;
 
-  const liquidationDistance = positionSize / leverage / positionSize;
-  const liquidationPrice = entryPrice && direction === 'LONG' 
-    ? entryPrice * (1 - liquidationDistance)
-    : entryPrice && entryPrice * (1 + liquidationDistance);
+  const liquidationPrice = entryPrice && direction === 'LONG'
+    ? entryPrice * (1 - 1/leverage) // lose full risk amount at liquidation
+    : entryPrice && entryPrice * (1 + 1/leverage);
 
   return (
     <div className="mb-8 space-y-4">
@@ -703,19 +824,27 @@ const App = () => {
   return (
     <AppContext.Provider value={state}>
       <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white">
-        <div className="max-w-md mx-auto p-6 py-8">
-          <Header balance={state.balance} positions={state.positions} />
+        {/* Mobile / Portrait Layout */}
+        <div className="lg:hidden max-w-md mx-auto p-6 py-8">
+          <Header balance={state.balance} positions={state.positions} onReset={state.resetState} />
           <MarketSelector 
             selectedMarket={state.selectedMarket}
             setSelectedMarket={state.setSelectedMarket}
             prices={state.prices}
           />
-          <MarketPrice 
+          <MarketPrice
             market={state.selectedMarket}
-            price={state.prices[state.selectedMarket]} 
+            price={state.prices[state.selectedMarket]}
           />
-          <DirectionSelector 
-            direction={state.direction} 
+          <AlivePriceChart
+            prices={state.priceHistory[state.selectedMarket]}
+            direction={state.direction === 'LONG' ? 'UP' : 'DOWN'}
+            entryPrice={state.positions.length > 0 ? state.positions[0].entryPrice : null}
+            currentPrice={state.prices[state.selectedMarket]}
+            pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
+          />
+          <DirectionSelector
+            direction={state.direction}
             setDirection={state.setDirection}
           />
           <PositionSizeSelector 
@@ -757,6 +886,150 @@ const App = () => {
             closePosition={state.closePosition}
             closeAllPositions={state.closeAllPositions}
           />
+        </div>
+
+        {/* Desktop / Landscape Layout */}
+        <div className="hidden lg:block w-full h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black text-white overflow-hidden">
+          <div className="flex h-full gap-6 p-8">
+            {/* Left Panel: Chart & Market Info (2/3 width) */}
+            <div className="flex-1 flex flex-col gap-4 min-w-0 overflow-hidden">
+              <Header balance={state.balance} positions={state.positions} onReset={state.resetState} />
+              
+              {/* Market Selector */}
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
+                <div className="grid grid-cols-3 gap-2">
+                  {['BTC', 'ETH', 'SOL'].map(market => (
+                    <button
+                      key={market}
+                      onClick={() => state.setSelectedMarket(market)}
+                      className={`py-3 px-3 rounded-xl font-semibold transition-all text-sm ${
+                        state.selectedMarket === market
+                          ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/50'
+                          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                      }`}
+                    >
+                      <div className="text-xs opacity-80">{market}</div>
+                      <div className="text-sm font-bold">
+                        {state.prices[market] ? `$${Number(state.prices[market]).toFixed(0)}` : '...'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Large Chart Area */}
+              <div className="flex-1 bg-gray-800/30 rounded-2xl p-6 flex flex-col items-center justify-center overflow-hidden min-h-0">
+                <MarketPrice
+                  market={state.selectedMarket}
+                  price={state.prices[state.selectedMarket]}
+                />
+                <div className="flex-1 w-full">
+                  <AlivePriceChart
+                    prices={state.priceHistory[state.selectedMarket]}
+                    direction={state.direction === 'LONG' ? 'UP' : 'DOWN'}
+                    entryPrice={state.positions.length > 0 ? state.positions[0].entryPrice : null}
+                    currentPrice={state.prices[state.selectedMarket]}
+                    pnl={state.positions.length > 0 ? state.positions[0].unrealizedPnL : 0}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Right Panel: Trading Controls (1/3 width) */}
+            <div className="w-96 flex flex-col gap-4 overflow-y-auto pr-2">
+              {/* Direction */}
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
+                <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Position Direction</div>
+                <DirectionSelector
+                  direction={state.direction}
+                  setDirection={state.setDirection}
+                />
+              </div>
+
+              {/* Position Size */}
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
+                <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Risk Amount</div>
+                <PositionSizeSelector 
+                  positionSize={state.positionSize} 
+                  setPositionSize={state.setPositionSize}
+                />
+              </div>
+
+              {/* Risk Mode */}
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
+                <div className="text-xs text-gray-400 mb-3 uppercase font-semibold">Risk Mode</div>
+                <RiskModeSelector 
+                  riskMode={state.riskMode} 
+                  setRiskMode={state.setRiskMode}
+                  showAdvanced={state.showAdvanced}
+                />
+              </div>
+
+              {/* Advanced Toggle */}
+              <div className="flex-shrink-0">
+                <AdvancedToggle 
+                  showAdvanced={state.showAdvanced}
+                  setShowAdvanced={state.setShowAdvanced}
+                />
+              </div>
+
+              {/* Advanced Settings */}
+              {state.showAdvanced && (
+                <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0">
+                  <AdvancedSettings
+                    advancedSettings={state.advancedSettings}
+                    setAdvancedSettings={state.setAdvancedSettings}
+                    selectedMarket={state.selectedMarket}
+                    prices={state.prices}
+                    direction={state.direction}
+                    positionSize={state.positionSize}
+                    riskMode={state.riskMode}
+                  />
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex-shrink-0">
+                <ActionButtons 
+                  openPosition={state.openPosition}
+                  selectedMarket={state.selectedMarket}
+                  prices={state.prices}
+                  direction={state.direction}
+                  positionSize={state.positionSize}
+                  riskMode={state.riskMode}
+                  showAdvanced={state.showAdvanced}
+                  advancedSettings={state.advancedSettings}
+                />
+              </div>
+
+              {/* Positions Summary */}
+              <div className="bg-gray-800/50 rounded-2xl p-3 text-xs flex-shrink-0">
+                <div className="text-gray-400 mb-2">Active Positions: {state.positions.length}</div>
+                {state.positions.length > 0 && (
+                  <div className="space-y-1">
+                    {state.positions.slice(0, 3).map(pos => (
+                      <div key={pos.id} className="flex justify-between text-xs text-gray-300">
+                        <span>{pos.direction} {pos.market}</span>
+                        <span className={pos.unrealizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}>
+                          {pos.unrealizedPnL >= 0 ? '+' : ''}${pos.unrealizedPnL.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Positions List */}
+              <div className="bg-gray-800/50 rounded-2xl p-4 flex-shrink-0 max-h-64 overflow-y-auto">
+                <h3 className="text-sm font-semibold mb-4 text-gray-300">Open Positions</h3>
+                <PositionsList 
+                  positions={state.positions}
+                  closePosition={state.closePosition}
+                  closeAllPositions={state.closeAllPositions}
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </AppContext.Provider>
